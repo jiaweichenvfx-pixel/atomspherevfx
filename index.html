@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AtmosphereFX</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "_three_raw": "https://unpkg.com/three@0.168.0/build/three.module.js",
+      "three": "./js/three-shim.js",
+      "three/addons/": "https://unpkg.com/three@0.168.0/examples/jsm/",
+      "postprocessing": "https://esm.sh/postprocessing@6.34.0?external=three&target=es2022",
+      "three-good-godrays": "https://unpkg.com/three-good-godrays@0.12.0/build/three-good-godrays.esm.js"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <!-- 视频背景层（默认隐藏） -->
+  <video id="video-background" loop muted playsinline></video>
+
+  <!-- 3D 渲染 Canvas 层 -->
+  <div id="canvas-container">
+    <canvas id="render-canvas"></canvas>
+    <div id="export-frame-border"></div>
+  </div>
+
+  <!-- 顶部状态栏 -->
+  <div id="status-bar">
+    <span id="status-text">就绪 — 请导入 FBX 模型</span>
+    <span id="status-renderer"></span>
+    <span class="status-sep">|</span>
+    <span class="bg-control">
+      <span class="bg-label">背景</span>
+      <input type="color" id="bg-color" value="#1a1a2e" title="背景颜色">
+      <button id="btn-bg-toggle" class="bg-toggle" title="背景开关">👁</button>
+    </span>
+    <span class="status-sep">|</span>
+    <span class="bg-control">
+      <span class="bg-label">网格</span>
+      <button id="btn-grid-toggle" class="bg-toggle" title="网格/坐标轴开关">📐</button>
+    </span>
+    <span class="status-sep">|</span>
+    <span class="bg-control">
+      <span class="bg-label">视频</span>
+      <button id="btn-video-toggle" class="bg-toggle off" title="视频背景开关">🎬</button>
+    </span>
+  </div>
+
+  <!-- 画幅设置 -->
+  <div id="frame-panel">
+    <span class="frame-label">画幅</span>
+    <input type="number" id="frame-width" value="1920" min="320" max="7680" step="2">
+    <span class="frame-sep">×</span>
+    <input type="number" id="frame-height" value="1080" min="240" max="4320" step="2">
+  </div>
+
+  <!-- 左侧摄像机列表 -->
+  <div id="camera-panel" class="panel hidden">
+    <div class="panel-header" id="camera-panel-toggle">
+      <span>📷 摄像机</span>
+      <span class="toggle-arrow">▼</span>
+    </div>
+    <ul id="camera-list" class="panel-content"></ul>
+  </div>
+
+  <!-- 左侧场景对象列表 -->
+  <div id="objects-panel" class="panel hidden">
+    <div class="panel-header" id="objects-panel-toggle">
+      <span>📋 场景对象</span>
+      <span class="toggle-arrow">▼</span>
+    </div>
+    <ul id="objects-list" class="panel-content"></ul>
+  </div>
+
+  <!-- 右上参数面板 -->
+  <div id="params-panel" class="panel hidden">
+    <div class="panel-header" id="params-panel-toggle">
+      <span>特效参数</span>
+      <span class="toggle-arrow">▼</span>
+    </div>
+    <div class="panel-content">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="godrays">光束</button>
+        <button class="tab-btn" data-tab="particles">粒子</button>
+        <button class="tab-btn" data-tab="smoke">烟雾</button>
+      </div>
+      <div class="tab-content hidden" id="tab-light"></div>
+      <div class="tab-content hidden" id="tab-particles">
+        <div class="param-section-label">粒子样式</div>
+        <div class="style-bar" id="particle-style-bar">
+          <button class="style-btn active" data-style="glow">✨ 光晕</button>
+          <button class="style-btn" data-style="snowflake">❄️ 雪花</button>
+          <button class="style-btn" data-style="raindrop">💧 雨点</button>
+        </div>
+        <div class="param-group">
+          <label class="param-label">粒子数量</label>
+          <input type="range" id="particle-count" min="10" max="4000" step="10" value="300">
+          <span class="param-value" id="particle-count-val">300</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">粒子大小</label>
+          <input type="range" id="particle-size" min="0.005" max="1" step="0.01" value="0.08">
+          <span class="param-value" id="particle-size-val">0.08</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">大小变化</label>
+          <input type="range" id="particle-size-var" min="0" max="2" step="0.05" value="0.5">
+          <span class="param-value" id="particle-size-var-val">0.5</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">透明度</label>
+          <input type="range" id="particle-opacity" min="0.025" max="2" step="0.05" value="0.5">
+          <span class="param-value" id="particle-opacity-val">0.5</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">透明度变化</label>
+          <input type="range" id="particle-opacity-var" min="0" max="2" step="0.05" value="0.5">
+          <span class="param-value" id="particle-opacity-var-val">0.5</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">漂浮速度</label>
+          <input type="range" id="particle-speed" min="0.025" max="4" step="0.05" value="0.4">
+          <span class="param-value" id="particle-speed-val">0.4</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">生成范围</label>
+          <input type="range" id="particle-spread" min="0.25" max="40" step="0.5" value="5">
+          <span class="param-value" id="particle-spread-val">5</span>
+        </div>
+        <div class="param-section-label">场景生成原点</div>
+        <div class="param-group">
+          <label class="param-label">原点 X</label>
+          <input type="range" id="particle-origin-x" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="particle-origin-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">原点 Y</label>
+          <input type="range" id="particle-origin-y" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="particle-origin-y-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">原点 Z</label>
+          <input type="range" id="particle-origin-z" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="particle-origin-z-val">0</span>
+        </div>
+        <div class="param-section-label">飘动方向</div>
+        <div class="param-group">
+          <label class="param-label">方向 X</label>
+          <input type="range" id="particle-drift-x" min="-20" max="20" step="0.1" value="0">
+          <span class="param-value" id="particle-drift-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">方向 Y</label>
+          <input type="range" id="particle-drift-y" min="-20" max="20" step="0.1" value="0">
+          <span class="param-value" id="particle-drift-y-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">方向 Z</label>
+          <input type="range" id="particle-drift-z" min="-20" max="20" step="0.1" value="0">
+          <span class="param-value" id="particle-drift-z-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">扰动强度</label>
+          <input type="range" id="particle-turbulence" min="0" max="6" step="0.05" value="0.5">
+          <span class="param-value" id="particle-turbulence-val">0.5</span>
+        </div>
+        <div class="param-section-label">旋转</div>
+        <div class="param-group">
+          <label class="param-label">旋转速度</label>
+          <input type="range" id="particle-rotation" min="0" max="20" step="0.1" value="0">
+          <span class="param-value" id="particle-rotation-val">0</span>
+        </div>
+        <div class="param-group" style="text-align:center">
+          <button id="btn-reset-rotation" class="style-btn" style="width:auto;flex:none;padding:6px 14px">🔄 重置旋转</button>
+        </div>
+        <div class="param-group">
+          <label class="param-label">颜色</label>
+          <input type="color" id="particle-color" value="#ffeedd">
+        </div>
+      </div>
+      <div class="tab-content hidden" id="tab-smoke">
+        <div class="param-section-label">烟雾样式</div>
+        <div class="style-bar" id="smoke-style-bar">
+          <button class="style-btn active" data-style="static">🏞️ 静态</button>
+          <button class="style-btn" data-style="mist">🌫️ 薄雾</button>
+          <button class="style-btn" data-style="thick">💨 浓烟</button>
+          <button class="style-btn" data-style="steam">♨️ 蒸汽</button>
+        </div>
+        <div class="param-group">
+          <label class="param-label">烟雾数量</label>
+          <input type="range" id="smoke-count" min="5" max="1000" step="1" value="60">
+          <span class="param-value" id="smoke-count-val">60</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">粒子大小</label>
+          <input type="range" id="smoke-size" min="0.3" max="10" step="0.05" value="3.5">
+          <span class="param-value" id="smoke-size-val">3.5</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">大小变化</label>
+          <input type="range" id="smoke-size-var" min="0" max="1" step="0.05" value="0.3">
+          <span class="param-value" id="smoke-size-var-val">0.3</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">透明度</label>
+          <input type="range" id="smoke-opacity" min="0.005" max="0.5" step="0.005" value="0.07">
+          <span class="param-value" id="smoke-opacity-val">0.07</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">透明度变化</label>
+          <input type="range" id="smoke-opacity-var" min="0" max="1" step="0.05" value="0.4">
+          <span class="param-value" id="smoke-opacity-var-val">0.4</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">生成范围</label>
+          <input type="range" id="smoke-spread" min="0.5" max="30" step="0.1" value="12">
+          <span class="param-value" id="smoke-spread-val">12</span>
+        </div>
+        <div class="param-section-label">场景生成原点</div>
+        <div class="param-group">
+          <label class="param-label">原点 X</label>
+          <input type="range" id="smoke-origin-x" min="-20" max="20" step="0.1" value="0">
+          <span class="param-value" id="smoke-origin-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">原点 Y</label>
+          <input type="range" id="smoke-origin-y" min="-20" max="20" step="0.1" value="0">
+          <span class="param-value" id="smoke-origin-y-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">原点 Z</label>
+          <input type="range" id="smoke-origin-z" min="-20" max="20" step="0.1" value="0">
+          <span class="param-value" id="smoke-origin-z-val">0</span>
+        </div>
+        <div class="param-section-label">飘动方向</div>
+        <div class="param-group">
+          <label class="param-label">方向 X</label>
+          <input type="range" id="smoke-drift-x" min="-5" max="5" step="0.1" value="0">
+          <span class="param-value" id="smoke-drift-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">方向 Y</label>
+          <input type="range" id="smoke-drift-y" min="-5" max="5" step="0.1" value="0.03">
+          <span class="param-value" id="smoke-drift-y-val">0.03</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">方向 Z</label>
+          <input type="range" id="smoke-drift-z" min="-5" max="5" step="0.1" value="0">
+          <span class="param-value" id="smoke-drift-z-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">扰动强度</label>
+          <input type="range" id="smoke-turbulence" min="0" max="5" step="0.01" value="0.08">
+          <span class="param-value" id="smoke-turbulence-val">0.08</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">颜色</label>
+          <input type="color" id="smoke-color" value="#ddeeff">
+        </div>
+      </div>
+      <div class="tab-content" id="tab-godrays">
+        <div class="param-section-label">光束参数</div>
+        <div class="param-group">
+          <label class="param-label">密度</label>
+          <input type="range" id="godrays-density" min="0" max="0.3" step="0.001" value="0.08">
+          <span class="param-value" id="godrays-density-val">0.08</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">最大密度</label>
+          <input type="range" id="godrays-max-density" min="0" max="2" step="0.05" value="0.8">
+          <span class="param-value" id="godrays-max-density-val">0.8</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">距离衰减</label>
+          <input type="range" id="godrays-distance-attenuation" min="0" max="20" step="0.5" value="8">
+          <span class="param-value" id="godrays-distance-attenuation-val">8</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">光线步进数</label>
+          <input type="range" id="godrays-raymarch-steps" min="16" max="128" step="1" value="64">
+          <span class="param-value" id="godrays-raymarch-steps-val">64</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">颜色</label>
+          <input type="color" id="godrays-color" value="#ffffff">
+        </div>
+        <div class="param-section-label">后处理</div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="godrays-blur" checked>
+            模糊
+          </label>
+        </div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="godrays-gamma" checked>
+            伽马校正
+          </label>
+        </div>
+        <div class="param-hint" id="godrays-hint">调节遮挡板参数控制光束纹理图案</div>
+        <div class="param-section-label">遮挡板 <button id="btn-generate-occluder" class="style-btn" style="width:auto;flex:none;padding:4px 10px;font-size:0.8em;margin-left:6px">⬛ 生成</button></div>
+        <div class="param-section-label" style="font-size:0.75em;margin-top:2px">图案类型</div>
+        <div class="style-bar" id="occluder-pattern-bar">
+          <button class="style-btn active" data-pattern="stripes">📐 条纹</button>
+          <button class="style-btn" data-pattern="radial">✳️ 放射</button>
+          <button class="style-btn" data-pattern="grid">🔲 网格</button>
+          <button class="style-btn" data-pattern="noise">🎲 噪点</button>
+        </div>
+        <div class="param-group">
+          <label class="param-label">光束数量</label>
+          <input type="range" id="occluder-pattern-count" min="2" max="20" step="1" value="6">
+          <span class="param-value" id="occluder-pattern-count-val">6</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">条纹角度</label>
+          <input type="range" id="occluder-pattern-angle" min="0" max="180" step="1" value="45">
+          <span class="param-value" id="occluder-pattern-angle-val">45</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">尺寸</label>
+          <input type="range" id="occluder-size" min="4" max="60" step="1" value="24">
+          <span class="param-value" id="occluder-size-val">24</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">噪点密度</label>
+          <input type="range" id="occluder-noise-density" min="0.05" max="0.95" step="0.05" value="0.7">
+          <span class="param-value" id="occluder-noise-density-val">0.7</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">噪点细节</label>
+          <input type="range" id="occluder-noise-scale" min="1" max="8" step="0.5" value="4">
+          <span class="param-value" id="occluder-noise-scale-val">4</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">斑点大小</label>
+          <input type="range" id="occluder-spot-size" min="0.2" max="5" step="0.1" value="1">
+          <span class="param-value" id="occluder-spot-size-val">1</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">边缘柔和度</label>
+          <input type="range" id="occluder-edge-softness" min="0" max="0.5" step="0.01" value="0.1">
+          <span class="param-value" id="occluder-edge-softness-val">0.1</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">细节层数</label>
+          <input type="range" id="occluder-octaves" min="2" max="6" step="1" value="4">
+          <span class="param-value" id="occluder-octaves-val">4</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">拉伸 X</label>
+          <input type="range" id="occluder-stretch-x" min="0.2" max="5" step="0.1" value="1">
+          <span class="param-value" id="occluder-stretch-x-val">1</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">拉伸 Y</label>
+          <input type="range" id="occluder-stretch-y" min="0.2" max="5" step="0.1" value="1">
+          <span class="param-value" id="occluder-stretch-y-val">1</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">对比度</label>
+          <input type="range" id="occluder-contrast" min="0.5" max="3" step="0.1" value="1">
+          <span class="param-value" id="occluder-contrast-val">1</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">光源距离</label>
+          <input type="range" id="occluder-distance" min="0.5" max="20" step="0.5" value="3">
+          <span class="param-value" id="occluder-distance-val">3</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">水平偏移</label>
+          <input type="range" id="occluder-offset-x" min="-10" max="10" step="0.1" value="0">
+          <span class="param-value" id="occluder-offset-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">垂直偏移</label>
+          <input type="range" id="occluder-offset-y" min="-10" max="10" step="0.1" value="0">
+          <span class="param-value" id="occluder-offset-y-val">0</span>
+        </div>
+        <div class="param-group" style="text-align:center">
+          <button id="btn-randomize-occluder" class="style-btn" style="width:auto;flex:none;padding:6px 14px">🎲 随机噪点</button>
+        </div>
+        <div class="param-section-label">旋转</div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="occluder-auto-orient" checked>
+            🔄 自动朝向光源
+          </label>
+        </div>
+        <div class="param-group">
+          <label class="param-label">旋转 X (°)</label>
+          <input type="range" id="occluder-rot-x" min="-180" max="180" step="1" value="0">
+          <span class="param-value" id="occluder-rot-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">旋转 Y (°)</label>
+          <input type="range" id="occluder-rot-y" min="-180" max="180" step="1" value="0">
+          <span class="param-value" id="occluder-rot-y-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">旋转 Z (°)</label>
+          <input type="range" id="occluder-rot-z" min="-180" max="180" step="1" value="0">
+          <span class="param-value" id="occluder-rot-z-val">0</span>
+        </div>
+        <div class="param-section-label">遮挡板目标</div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="occluder-follow-camera" checked>
+            📷 跟随相机
+          </label>
+        </div>
+        <div class="param-group">
+          <label class="param-label">目标 X</label>
+          <input type="range" id="occluder-target-x" min="-50" max="50" step="0.5" value="0" disabled>
+          <span class="param-value" id="occluder-target-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">目标 Y</label>
+          <input type="range" id="occluder-target-y" min="-50" max="50" step="0.5" value="0" disabled>
+          <span class="param-value" id="occluder-target-y-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">目标 Z</label>
+          <input type="range" id="occluder-target-z" min="-50" max="50" step="0.5" value="0" disabled>
+          <span class="param-value" id="occluder-target-z-val">0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  	  <!-- 时间线面板（底部居中） -->
+	  <div id="timeline-panel" class="panel">
+	    <div class="panel-header" id="timeline-panel-toggle">
+	      <span>⏱ 时间线</span>
+	      <span class="toggle-arrow">▼</span>
+	    </div>
+	    <div class="panel-content">
+	      <div id="timeline-controls">
+	        <button id="timeline-play" class="tl-btn" title="播放/暂停">▶</button>
+	        <button id="timeline-stop" class="tl-btn" title="停止">⏹</button>
+	        <button id="timeline-loop" class="tl-btn active" title="循环">🔁</button>
+	        <button id="timeline-record" class="tl-btn" title="录制">⭕</button>
+	        <span class="tl-sep">|</span>
+	        <button id="timeline-prev-kf" class="tl-btn" title="上一个关键帧">⏮</button>
+	        <button id="timeline-next-kf" class="tl-btn" title="下一个关键帧">⏭</button>
+	        <span class="tl-sep">|</span>
+	        <button id="timeline-add-kf" class="tl-btn" title="在当前时间添加关键帧（所有滑块当前值）">+ 关键帧</button>
+	        <button id="timeline-del-kf" class="tl-btn" title="删除当前时间的所有关键帧">− 删帧</button>
+	        <button id="timeline-clear" class="tl-btn" title="清除所有关键帧">🗑 清空</button>
+	        <span class="tl-sep">|</span>
+	        <span id="timeline-time-display">00:00.0 / 10.0s</span>
+	        <span id="timeline-frame-display">(帧: 000)</span>
+	        <span class="tl-sep">|</span>
+	        <label class="tl-label">
+	          时长
+	          <input type="number" id="timeline-duration" value="10" min="1" max="120" step="1">
+	          s
+	        </label>
+	        <span class="tl-sep">|</span>
+	        <label class="tl-label">
+	          FPS
+	          <input type="number" id="timeline-fps" value="30" min="1" max="120" step="1">
+	        </label>
+	      </div>
+	      <div id="timeline-ruler">
+	        <div id="timeline-playhead"></div>
+	      </div>
+	      <input type="range" id="timeline-scrubber" min="0" max="10" step="0.01" value="0">
+	    </div>
+	  </div>
+
+<!-- 底部工具栏 -->
+  <div id="toolbar">
+    <button id="btn-import-fbx" class="tool-btn primary">
+      <span class="btn-icon">📁</span>
+      <span>导入 FBX</span>
+    </button>
+    <input type="file" id="fbx-file-input" accept=".fbx" hidden>
+    <button id="btn-add-light" class="tool-btn">
+      <span class="btn-icon">💡</span>
+      <span>添加点光</span>
+    </button>
+    <button id="btn-toggle-model" class="tool-btn">
+      <span class="btn-icon">📦</span>
+      <span>场景物体</span>
+    </button>
+    <button id="btn-video-bg" class="tool-btn">
+      <span class="btn-icon">🎬</span>
+      <span>视频背景</span>
+    </button>
+    <button id="btn-wireframe" class="tool-btn">
+      <span class="btn-icon">🔲</span>
+      <span>线框模式</span>
+    </button>
+    <button id="btn-particles" class="tool-btn">
+      <span class="btn-icon">✨</span>
+      <span>粒子效果</span>
+    </button>
+    <button id="btn-smoke" class="tool-btn">
+      <span class="btn-icon">💨</span>
+      <span>烟雾效果</span>
+    </button>
+    <button id="btn-godrays" class="tool-btn">
+      <span class="btn-icon">☀️</span>
+      <span>光束效果</span>
+    </button>
+    <button id="btn-reset-view" class="tool-btn">
+      <span class="btn-icon">🔄</span>
+      <span>重置视角</span>
+    </button>
+    <button id="btn-export" class="tool-btn">
+      <span class="btn-icon">🎥</span>
+      <span>输出</span>
+    </button>
+  </div>
+
+  <!-- 导出选项模态框 -->
+  <div id="export-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-title">输出设置</div>
+      <div class="modal-row">
+        <label class="modal-label" for="export-duration">时长 (秒)</label>
+        <input type="number" id="export-duration" class="modal-input" value="10" min="1" max="120" step="1">
+      </div>
+      <div class="modal-row">
+        <label class="modal-label" for="export-fps">FPS</label>
+        <input type="number" id="export-fps" class="modal-input" value="30" min="1" max="120" step="1">
+      </div>
+      <div class="modal-row">
+        <label class="modal-checkbox">
+          <input type="checkbox" id="export-bg">
+          <span>背景</span>
+        </label>
+      </div>
+      <div class="modal-row">
+        <label class="modal-checkbox">
+          <input type="checkbox" id="export-grid">
+          <span>网格</span>
+        </label>
+      </div>
+      <div class="modal-row">
+        <label class="modal-checkbox">
+          <input type="checkbox" id="export-video">
+          <span>视频</span>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-export-start" class="modal-btn primary">开始输出</button>
+        <button id="btn-export-cancel" class="modal-btn">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载蒙层 -->
+  <div id="loading-overlay" class="hidden">
+    <div class="loading-spinner"></div>
+    <div id="loading-text">加载中...</div>
+  </div>
+
+  <script type="module" src="js/main.js?v=13"></script>
+</body>
+</html>

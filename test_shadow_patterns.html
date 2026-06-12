@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>点光源遮挡板图案测试 - PointLight Occluder Pattern Test</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; color:#fff; font-family:monospace; overflow:hidden; }
+  #ui { position:fixed; top:0; left:0; right:0; z-index:10;
+        background:rgba(0,0,0,0.9); padding:10px 14px;
+        display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { padding:6px 14px; border:1px solid #555; background:#333; color:#eee;
+           border-radius:4px; cursor:pointer; font-size:13px; white-space:nowrap; }
+  button.active { background:#ff6600; border-color:#ff6600; }
+  button:hover { border-color:#ffaa00; }
+  label { font-size:12px; display:flex; align-items:center; gap:4px; }
+  input[type=range] { width:70px; accent-color:#ff6600; }
+  #status { color:#ffaa00; font-size:12px; margin-left:auto; }
+  #view { position:fixed; top:60px; left:0; right:0; bottom:0; }
+  #view canvas { width:100%; height:100%; }
+  #info { position:fixed; bottom:8px; left:8px; color:#888; font-size:10px; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <b style="color:#ffaa00;">🔬 PointLight Shadow Test</b> <span>|</span>
+
+  <button data-pattern="stripes" class="active">📐 条纹</button>
+  <button data-pattern="radial">✳️ 放射</button>
+  <button data-pattern="grid">🔲 网格</button>
+  <button data-pattern="noise">🎲 噪点</button>
+
+  <span>|</span>
+  <label>密度 <input type="range" id="density" min="0.1" max="1" step="0.05" value="0.7">
+    <span id="dv">0.7</span></label>
+  <label>柔和 <input type="range" id="softness" min="0.01" max="0.3" step="0.01" value="0.08">
+    <span id="sv">0.08</span></label>
+  <label>数量 <input type="range" id="count" min="2" max="20" step="1" value="6">
+    <span id="cv">6</span></label>
+  <label>尺寸 <input type="range" id="size" min="2" max="20" step="1" value="6">
+    <span id="szv">6</span></label>
+  <label>距离 <input type="range" id="dist" min="1" max="10" step="0.5" value="3">
+    <span id="dtv">3</span></label>
+
+  <span>|</span>
+  <button id="gr-toggle">☀️ 光束</button>
+  <label>密度 <input type="range" id="gr-density" min="0.02" max="0.3" step="0.01" value="0.08" disabled>
+    <span id="gdv">0.08</span></label>
+  <label>衰减 <input type="range" id="gr-atten" min="1" max="20" step="0.5" value="8" disabled>
+    <span id="gav">8.0</span></label>
+  <label>强度 <input type="range" id="gr-maxden" min="0.2" max="1.5" step="0.05" value="0.8" disabled>
+    <span id="gmdv">0.80</span></label>
+  <label>颜色 <input type="color" id="gr-color" value="#ffffff" disabled></label>
+
+  <span>|</span>
+  <button id="btn-reset">🔄 重置视角</button>
+  <span id="status">就绪</span>
+</div>
+
+<div id="view"></div>
+<div id="info">🖱 拖拽旋转 · 滚轮缩放 · 右键平移 · 观察地面阴影图案变化</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.168.0/build/three.module.js",
+    "postprocessing": "https://esm.sh/postprocessing@6.34.0?external=three&target=es2022",
+    "three-good-godrays": "https://unpkg.com/three-good-godrays@0.12.0/build/three-good-godrays.esm.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ── DOM ──────────────────────────────────
+const container = document.getElementById('view');
+const statusEl  = document.getElementById('status');
+function status(m) { statusEl.textContent = m; console.log(m); }
+
+// ── Renderer ─────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+container.appendChild(renderer.domElement);
+
+// ── Scene ────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a14);
+scene.fog = new THREE.Fog(0x0a0a14, 15, 50);
+
+// ── Camera ───────────────────────────────
+const camera = new THREE.PerspectiveCamera(55, container.clientWidth/container.clientHeight, 0.1, 100);
+camera.position.set(0, 10, 5);
+camera.lookAt(0, -2, -1);
+
+// ── Lights ───────────────────────────────
+// 环境光（降低以避免冲刷阴影）
+scene.add(new THREE.AmbientLight(0x111122, 0.15));
+
+// ★ 点光源 — 核心（移近地面让阴影更清晰）
+const pointLight = new THREE.PointLight(0xffffff, 200, 30, 1);
+pointLight.position.set(0, 3, -2);
+pointLight.castShadow = true;
+pointLight.shadow.mapSize.set(2048, 2048);
+pointLight.shadow.camera.near = 0.1;
+pointLight.shadow.camera.far = 30;
+pointLight.shadow.bias = -0.0003;
+pointLight.shadow.normalBias = 0.02;
+scene.add(pointLight);
+
+// 光源可视化小球
+const bulbGeo = new THREE.SphereGeometry(0.15, 16, 16);
+const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffdd88 });
+const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+pointLight.add(bulb);
+
+// ── 地面（接收阴影）───────────────────────
+const floorGeo = new THREE.PlaneGeometry(20, 20);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x667788, roughness: 0.7, metalness: 0.1 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// ── 几面墙（更好地显示阴影图案）────────────
+function addWall(w, h, x, y, z, ry) {
+  const geo = new THREE.PlaneGeometry(w, h);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.8, metalness: 0.05 });
+  const wall = new THREE.Mesh(geo, mat);
+  wall.position.set(x, y, z);
+  wall.rotation.y = ry;
+  wall.receiveShadow = true;
+  scene.add(wall);
+}
+addWall(20, 8, 0, 2, -6, 0);                   // 后墙
+addWall(20, 8, 0, 2, 10, Math.PI);              // 前墙
+
+// ── 参考球（帮助判断光照方向）───────────────
+const refGeo = new THREE.SphereGeometry(0.5, 32, 32);
+const refMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.3, metalness: 0.2 });
+const refSphere = new THREE.Mesh(refGeo, refMat);
+refSphere.position.set(3, -1.5, 2);
+refSphere.castShadow = true;
+refSphere.receiveShadow = true;
+scene.add(refSphere);
+
+const refBoxGeo = new THREE.BoxGeometry(1, 1, 1);
+const refBoxMat = new THREE.MeshStandardMaterial({ color: 0xccbbaa, roughness: 0.4, metalness: 0.1 });
+const refBox = new THREE.Mesh(refBoxGeo, refBoxMat);
+refBox.position.set(-3, -1.5, 2);
+refBox.castShadow = true;
+refBox.receiveShadow = true;
+scene.add(refBox);
+
+// ── 遮挡板 ────────────────────────────────
+let occluder, occluderDistMat;
+// 持久 uniform 引用——纹理变化时直接更新 .value 而无需重新编译着色器
+let _alphaMapUniform = null;
+let _alphaTestUniform = null;
+
+function createOccluder() {
+  if (occluder) {
+    if (occluderDistMat) occluderDistMat.dispose();
+    if (occluder.geometry) occluder.geometry.dispose();
+    if (occluder.material) occluder.material.dispose();
+    scene.remove(occluder);
+  }
+  // ★ 重建遮挡板时重置持久 uniform 引用，避免指向已销毁的纹理
+  _alphaMapUniform = null;
+  _alphaTestUniform = null;
+  const sz = parseFloat(document.getElementById('size').value);
+  const geo = new THREE.PlaneGeometry(sz, sz);
+  const mat = new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  occluder = new THREE.Mesh(geo, mat);
+  occluder.castShadow = true;
+  occluder.receiveShadow = false;
+  occluder.frustumCulled = false;
+
+  // ★ MeshDistanceMaterial (PointLight 专用)
+  // Three.js 0.168 的 distance shader 已原生支持 alphaMap/alphaTest！
+  // 包含 #include <alphamap_fragment> 和 #include <alphatest_fragment>
+  occluderDistMat = new THREE.MeshDistanceMaterial({ side: THREE.DoubleSide });
+
+  // ★ CRITICAL FIX: Three.js r168 不会为 MeshDistanceMaterial 添加 USE_ALPHAMAP/
+  // USE_ALPHATEST/USE_UV 着色器宏定义，导致所有 alpha 采样代码因 #ifdef 被跳过。
+  // 直接在 shader 源码前注入 #define 指令是最高效且最健壮的修复方式——
+  // Three.js 已有的 shader 代码本身完全正确，只是被宏守卫挡住了。
+  occluderDistMat.onBeforeCompile = (shader) => {
+    // Three.js r168 auto-adds USE_ALPHAMAP / USE_ALPHATEST / ALPHAMAP_UV
+    // when alphaMap is set on the material (via shadow system copy from main material).
+    // Only USE_UV is missing — needed for vUv declaration in uv_pars_vertex.
+    const defines = '#define USE_UV\n';
+    shader.fragmentShader = defines + shader.fragmentShader;
+    shader.vertexShader = defines + shader.vertexShader;
+
+    // ★ Bridge uniforms via persistent refs so texture changes don't need recompile
+    if (!_alphaMapUniform) _alphaMapUniform = { value: occluderDistMat.alphaMap };
+    if (!_alphaTestUniform) _alphaTestUniform = { value: occluderDistMat.alphaTest };
+    shader.uniforms.alphaMap = _alphaMapUniform;
+    shader.uniforms.alphaTest = _alphaTestUniform;
+
+    if (!occluderDistMat._loggedShader) {
+      console.log('✅ onBeforeCompile: injected USE_UV define');
+      console.log('  alphaMap texture:', !!occluderDistMat.alphaMap);
+      occluderDistMat._loggedShader = true;
+    }
+  };
+
+  occluder.customDistanceMaterial = occluderDistMat;
+
+  scene.add(occluder);
+  positionOccluder();
+}
+
+function positionOccluder() {
+  if (!occluder) return;
+  const dist = parseFloat(document.getElementById('dist').value);
+  const lightPos = pointLight.position;
+  // ★ Point occluder toward scene center (below light) so shadows fall on floor
+  const dir = new THREE.Vector3(0, -1, 0.3).normalize(); // downward + slightly forward
+  occluder.position.copy(lightPos).addScaledVector(dir, dist);
+  occluder.lookAt(lightPos);
+}
+
+createOccluder();
+
+// ── 纹理生成（从 OccluderSystem 移植）─────
+
+const RES = 1024;
+
+function pseudoRandom(x, y, seed) {
+  const n = Math.sin(x * 12.9898 + y * 78.233 + seed * 437.585) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function generatePattern(patternType, density, softness, count) {
+  const canvas = document.createElement('canvas');
+  canvas.width = RES;
+  canvas.height = RES;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(RES, RES);
+  const d = img.data;
+
+  if (patternType === 'stripes') {
+    const angleRad = THREE.MathUtils.degToRad(45);
+    const cosA = Math.cos(angleRad), sinA = Math.sin(angleRad);
+    const half = RES / 2, sw = RES / count;
+    const transition = Math.max(1, sw * softness);
+
+    for (let y = 0; y < RES; y++) {
+      for (let x = 0; x < RES; x++) {
+        const i = (y * RES + x) * 4;
+        const rx = (x - half) * cosA - (y - half) * sinA;
+        const sp = ((rx % sw) + sw) % sw;
+        const dtc = Math.min(sp, sw - sp);
+        const hs = sw * density * 0.5;
+        const ed = hs - dtc;
+
+        let a;
+        if (ed > transition) a = 255;
+        else if (ed < -transition) a = 0;
+        else a = Math.round(((ed + transition) / (transition * 2)) * 255);
+        d[i] = d[i+1] = d[i+2] = d[i+3] = a;
+      }
+    }
+  } else if (patternType === 'radial') {
+    const half = RES / 2, apb = (Math.PI * 2) / count;
+    const transition = Math.max(0.01, apb * softness);
+
+    for (let y = 0; y < RES; y++) {
+      for (let x = 0; x < RES; x++) {
+        const i = (y * RES + x) * 4;
+        const dx = x - half, dy = y - half;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < RES * 0.04) { d[i]=d[i+1]=d[i+2]=d[i+3]=0; continue; }
+        let angle = Math.atan2(dy, dx);
+        if (angle < 0) angle += Math.PI * 2;
+        const bi = Math.round(angle / apb);
+        const bc = bi * apb;
+        const ad = Math.abs(angle - bc);
+        const hb = apb * density * 0.5;
+        const ed = hb - ad;
+
+        let a;
+        if (ed > transition) a = 255;
+        else if (ed < -transition) a = 0;
+        else a = Math.round(((ed + transition) / (transition * 2)) * 255);
+        d[i] = d[i+1] = d[i+2] = d[i+3] = a;
+      }
+    }
+  } else if (patternType === 'grid') {
+    const cs = RES / count;
+    const transition = Math.max(1, cs * softness);
+    const bw = cs * density * 0.5;
+
+    for (let y = 0; y < RES; y++) {
+      for (let x = 0; x < RES; x++) {
+        const i = (y * RES + x) * 4;
+        const gx = ((x % cs) + cs) % cs, gy = ((y % cs) + cs) % cs;
+        const dx = Math.min(gx, cs - gx), dy = Math.min(gy, cs - gy);
+        const dtb = Math.max(bw - dx, bw - dy);
+
+        let a;
+        if (dtb > transition) a = 255;
+        else if (dtb < -transition) a = 0;
+        else a = Math.round(((dtb + transition) / (transition * 2)) * 255);
+        d[i] = d[i+1] = d[i+2] = d[i+3] = a;
+      }
+    }
+  } else if (patternType === 'noise') {
+    const noiseScale = 4, noiseSpotSize = 1.0;
+    const noiseOctaves = 4, noiseStretchX = 1.0, noiseStretchY = 1.0, noiseContrast = 1.0;
+    const baseScale = noiseScale / noiseSpotSize;
+    const seed = 0.5;
+
+    const scales = [], weights = [];
+    let tw = 0;
+    for (let i = 0; i < noiseOctaves; i++) {
+      scales.push(baseScale * Math.pow(2, i));
+      const w = Math.pow(0.5, i + 1);
+      weights.push(w); tw += w;
+    }
+    for (let i = 0; i < weights.length; i++) weights[i] /= tw;
+
+    const transition = softness;
+
+    for (let y = 0; y < RES; y++) {
+      for (let x = 0; x < RES; x++) {
+        const i = (y * RES + x) * 4;
+        const sx = x / noiseStretchX, sy = y / noiseStretchY;
+        let value = 0;
+        for (let j = 0; j < scales.length; j++) {
+          value += pseudoRandom(sx/scales[j], sy/scales[j], seed + j*0.1) * weights[j];
+        }
+        value = Math.max(0, Math.min(1, value));
+        value = 0.5 + (value - 0.5) * noiseContrast;
+        value = Math.max(0, Math.min(1, value));
+
+        const threshold = 1 - density;
+        let a;
+        if (transition <= 0.001) {
+          a = value > threshold ? 255 : 0;
+        } else if (value > threshold + transition) {
+          a = 255;
+        } else if (value > threshold - transition && value <= threshold + transition) {
+          a = Math.round(((value - (threshold - transition)) / (transition * 2)) * 255);
+        } else {
+          a = 0;
+        }
+        d[i] = d[i+1] = d[i+2] = d[i+3] = a;
+      }
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+// ── 应用纹理到遮挡板 ──────────────────────
+let currentPattern = 'stripes';
+let currentDensity = 0.7, currentSoftness = 0.08, currentCount = 6;
+
+function applyPattern() {
+  const texCanvas = generatePattern(currentPattern, currentDensity, currentSoftness, currentCount);
+
+  // 统计
+  const ctx = texCanvas.getContext('2d');
+  let opaque = 0, transparent = 0, total = 0;
+  for (let y = 0; y < RES; y += 15) {
+    for (let x = 0; x < RES; x += 15) {
+      total++;
+      const a = ctx.getImageData(x, y, 1, 1).data[0];
+      if (a === 255) opaque++;
+      else if (a === 0) transparent++;
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(texCanvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.colorSpace = THREE.LinearSRGBColorSpace;
+
+  // ★ 更新 MeshDistanceMaterial — Three.js 0.168 原生支持 alphaMap
+  if (occluderDistMat) {
+    if (occluderDistMat.alphaMap) occluderDistMat.alphaMap.dispose();
+    occluderDistMat.alphaMap = texture;
+    occluderDistMat.alphaTest = 0.05;
+    // ★ 同步持久 uniform 引用——避免因着色器程序缓存复用导致 uniform 值过时
+    if (_alphaMapUniform) _alphaMapUniform.value = texture;
+    if (_alphaTestUniform) _alphaTestUniform.value = 0.05;
+    console.log('alphaMap updated:', !!occluderDistMat.alphaMap);
+  }
+
+  // ★★ CRITICAL: WebGLShadowMap.getDepthMaterial() line 305-306 copies alphaMap
+  // from the MAIN mesh material to customDistanceMaterial EVERY FRAME.
+  // We MUST set it on the MeshBasicMaterial too, or it gets overwritten.
+  // (Same texture object — no separate dispose needed; occluderDistMat owns it.)
+  if (occluder && occluder.material) {
+    occluder.material.alphaMap = texture;
+    occluder.material.alphaTest = 0.05;
+    occluder.material.needsUpdate = true;
+  }
+
+  status(`${currentPattern}: 不透明${(opaque/total*100).toFixed(0)}% 透明${(transparent/total*100).toFixed(0)}% | 观察地面阴影图案`);
+}
+
+applyPattern();
+
+// ── UI 事件 ───────────────────────────────
+document.querySelectorAll('[data-pattern]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-pattern]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentPattern = btn.dataset.pattern;
+    applyPattern();
+  });
+});
+
+['density','softness','count','size','dist'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', () => {
+    const v = parseFloat(el.value);
+    document.getElementById({density:'dv',softness:'sv',count:'cv',size:'szv',dist:'dtv'}[id]).textContent = v;
+    if (id === 'density') { currentDensity = v; applyPattern(); }
+    else if (id === 'softness') { currentSoftness = v; applyPattern(); }
+    else if (id === 'count') { currentCount = Math.round(v); applyPattern(); }
+    else if (id === 'size') { createOccluder(); applyPattern(); }
+    else if (id === 'dist') { positionOccluder(); }
+  });
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  camera.position.set(8, 6, 12);
+  camera.lookAt(0, 2, 0);
+});
+
+// ── Orbit Controls ────────────────────────
+let isDragging = false, isPanning = false;
+let prevX, prevY;
+const canvas = renderer.domElement;
+
+canvas.addEventListener('pointerdown', e => {
+  isDragging = true;
+  isPanning = e.button === 2 || e.ctrlKey;
+  prevX = e.clientX; prevY = e.clientY;
+});
+canvas.addEventListener('pointermove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - prevX, dy = e.clientY - prevY;
+  prevX = e.clientX; prevY = e.clientY;
+
+  if (isPanning) {
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    camera.getWorldDirection(new THREE.Vector3());
+    right.crossVectors(camera.getWorldDirection(new THREE.Vector3()), camera.up).normalize();
+    up.copy(camera.up).normalize();
+    camera.position.addScaledVector(right, -dx * 0.02);
+    camera.position.addScaledVector(up, dy * 0.02);
+  } else {
+    const spherical = new THREE.Spherical();
+    const center = new THREE.Vector3(0, 2, 0);
+    const offset = camera.position.clone().sub(center);
+    spherical.setFromVector3(offset);
+    spherical.theta -= dx * 0.005;
+    spherical.phi -= dy * 0.005;
+    spherical.phi = Math.max(0.1, Math.min(Math.PI / 2, spherical.phi));
+    offset.setFromSpherical(spherical);
+    camera.position.copy(center).add(offset);
+    camera.lookAt(center);
+  }
+});
+canvas.addEventListener('pointerup', () => { isDragging = false; });
+canvas.addEventListener('pointerleave', () => { isDragging = false; });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  camera.position.addScaledVector(dir, e.deltaY * 0.01);
+}, { passive: false });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ── Resize ────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+// ── Debug: log shadow map info ────────────
+setTimeout(() => {
+  console.log('Shadow map:', {
+    enabled: renderer.shadowMap.enabled,
+    type: renderer.shadowMap.type,
+    lightShadowMapSize: pointLight.shadow.mapSize.toArray(),
+    lightNear: pointLight.shadow.camera.near,
+    lightFar: pointLight.shadow.camera.far,
+    lightBias: pointLight.shadow.bias,
+    occluderHasCustomDistance: !!occluder.customDistanceMaterial,
+    occluderMaterialType: occluder.customDistanceMaterial?.type,
+    occluderAlphaMap: !!occluderDistMat?.alphaMap,
+    occluderAlphaTest: occluderDistMat?.alphaTest,
+  });
+}, 1000);
+
+// ── God Rays (丁达尔光) ────────────────────────
+import { EffectComposer, RenderPass } from 'postprocessing';
+import { GodraysPass } from 'three-good-godrays';
+
+// 确保光源 shadow camera 范围合适
+pointLight.shadow.camera.near = 0.05;
+pointLight.shadow.camera.far = 200;
+
+let grEnabled = false;
+let grComposer = null;
+
+function setupGodRays() {
+  if (grComposer) {
+    grComposer.dispose();
+    grComposer = null;
+  }
+
+  grComposer = new EffectComposer(renderer, {
+    frameBufferType: THREE.HalfFloatType,
+  });
+
+  const renderPass = new RenderPass(scene, camera);
+  renderPass.renderToScreen = false;
+  grComposer.addPass(renderPass);
+
+  const density = parseFloat(document.getElementById('gr-density').value);
+  const atten = parseFloat(document.getElementById('gr-atten').value);
+  const maxDen = parseFloat(document.getElementById('gr-maxden').value);
+  const colorHex = document.getElementById('gr-color').value;
+
+  const grPass = new GodraysPass(pointLight, camera, {
+    density,
+    maxDensity: maxDen,
+    distanceAttenuation: atten,
+    color: new THREE.Color(colorHex),
+    raymarchSteps: 64,
+    blur: true,
+    gammaCorrection: true,
+    resolutionScale: 0.5,
+    upsampleQuality: 1,
+  });
+  grPass.renderToScreen = true;
+  grComposer.addPass(grPass);
+}
+
+// 切换光束
+document.getElementById('gr-toggle').addEventListener('click', () => {
+  grEnabled = !grEnabled;
+  const btn = document.getElementById('gr-toggle');
+  btn.classList.toggle('active', grEnabled);
+  document.getElementById('gr-density').disabled = !grEnabled;
+  document.getElementById('gr-atten').disabled = !grEnabled;
+  document.getElementById('gr-maxden').disabled = !grEnabled;
+  document.getElementById('gr-color').disabled = !grEnabled;
+  if (grEnabled) {
+    setupGodRays();
+    status('☀️ 光束已开启 — 调整遮挡板图案观察光束变化');
+  } else {
+    if (grComposer) { grComposer.dispose(); grComposer = null; }
+    renderer.setRenderTarget(null);
+    const sz = renderer.getSize(new THREE.Vector2());
+    renderer.setViewport(0, 0, sz.x, sz.y);
+    renderer.setScissor(0, 0, sz.x, sz.y);
+    renderer.setScissorTest(false);
+    renderer.state.reset();
+    status('☀️ 光束已关闭 — 观察地面阴影图案');
+  }
+});
+
+['gr-density','gr-atten','gr-maxden'].forEach(id => {
+  const el = document.getElementById(id);
+  const spanId = { 'gr-density':'gdv', 'gr-atten':'gav', 'gr-maxden':'gmdv' }[id];
+  el.addEventListener('input', () => {
+    const v = parseFloat(el.value);
+    document.getElementById(spanId).textContent = v.toFixed(2);
+    if (grEnabled) setupGodRays();
+  });
+});
+document.getElementById('gr-color').addEventListener('input', () => {
+  if (grEnabled) setupGodRays();
+});
+
+// ── Render Loop ───────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  if (grEnabled && grComposer) {
+    grComposer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
+}
+animate();
+
+status('✅ 就绪 — 点击「☀️ 光束」开启丁达尔光效果');
+</script>
+</body>
+</html>
