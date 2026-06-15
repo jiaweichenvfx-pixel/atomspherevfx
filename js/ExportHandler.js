@@ -27,6 +27,7 @@ export class ExportHandler {
     this._savedState = null;
     this._onRecordingStateChange = null;
     this._savedOccluderHelperVis = undefined;
+    this._savedLightBeamHelperVis = undefined;
   }
 
   setCamera(camera) { this._camera = camera; }
@@ -223,6 +224,11 @@ export class ExportHandler {
         this._savedOccluderHelperVis = occHelper.visible;
         occHelper.visible = false;
       }
+      const beam = api.lightBeamSystem;
+      if (beam) {
+        this._savedLightBeamHelperVis = beam.helperVisible;
+        beam.helperVisible = false;
+      }
     }
 
     // Resize renderer to export resolution (pixelRatio=1 for exact match)
@@ -302,6 +308,11 @@ export class ExportHandler {
       const occHelper = window.__atmosphereFX?.occluderSystem?.helper;
       if (occHelper) occHelper.visible = this._savedOccluderHelperVis;
       this._savedOccluderHelperVis = undefined;
+    }
+    if (this._savedLightBeamHelperVis !== undefined) {
+      const beam = window.__atmosphereFX?.lightBeamSystem;
+      if (beam) beam.helperVisible = this._savedLightBeamHelperVis;
+      this._savedLightBeamHelperVis = undefined;
     }
 
     // ★ 恢复遮挡板位置（导出时 animate loop 可能改变了它）

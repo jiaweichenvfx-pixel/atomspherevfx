@@ -17,13 +17,14 @@ export class UIHandler {
    * @param {THREE.PerspectiveCamera} modules.camera
    * @param {THREE.Scene} modules.scene
    */
-  constructor({ sceneManager, orbitController, fbxHandler, particleSystem, smokeSystem, godRaysSystem, occluderSystem, timelineSystem, exportHandler, renderer, camera, scene }) {
+  constructor({ sceneManager, orbitController, fbxHandler, particleSystem, smokeSystem, godRaysSystem, lightBeamSystem, occluderSystem, timelineSystem, exportHandler, renderer, camera, scene }) {
     this.sceneManager = sceneManager;
     this.orbitController = orbitController;
     this.fbxHandler = fbxHandler;
     this.particleSystem = particleSystem;
     this.smokeSystem = smokeSystem;
     this.godRaysSystem = godRaysSystem;
+    this.lightBeamSystem = lightBeamSystem;
     this.occluderSystem = occluderSystem;
     this.timelineSystem = timelineSystem;
     this.exportHandler = exportHandler;
@@ -299,7 +300,8 @@ export class UIHandler {
 
     // 光束效果
     document.getElementById('btn-godrays').addEventListener('click', () => {
-      const active = this.godRaysSystem.toggle();
+      this._prepareLightBeamDefaults();
+      const active = this.lightBeamSystem.toggle();
       const btn = document.getElementById('btn-godrays');
       if (active) {
         // 如果还没有设置光源，自动选取场景中第一个点光源
@@ -312,18 +314,23 @@ export class UIHandler {
           });
           if (firstPointLight) {
             this.godRaysSystem.setLight(firstPointLight);
+            this.lightBeamSystem.setLight(firstPointLight);
           }
         }
         btn.classList.add('active');
         this._updateGodRaysSliders();
+        this._updateLightBeamSliders();
         const paramsPanel = document.getElementById('params-panel');
         if (paramsPanel) paramsPanel.classList.remove('hidden');
         const godraysTab = document.querySelector('.tab-btn[data-tab="godrays"]');
         if (godraysTab) godraysTab.click();
-        this.updateStatus('光束效果: 开启');
+        this.updateStatus('丁达尔光束: 开启 — 可用源点/目标/长度/半径控制');
       } else {
+        this.godRaysSystem.setEnabled(false);
+        const postprocessCheck = document.getElementById('godrays-postprocess-enabled');
+        if (postprocessCheck) postprocessCheck.checked = false;
         btn.classList.remove('active');
-        this.updateStatus('光束效果: 关闭');
+        this.updateStatus('丁达尔光束: 关闭');
       }
     });
   }
@@ -658,7 +665,9 @@ export class UIHandler {
 
     [
       'particle-origin-x', 'particle-origin-y', 'particle-origin-z',
-      'smoke-origin-x', 'smoke-origin-y', 'smoke-origin-z'
+      'smoke-origin-x', 'smoke-origin-y', 'smoke-origin-z',
+      'beam-origin-x', 'beam-origin-y', 'beam-origin-z',
+      'beam-target-x', 'beam-target-y', 'beam-target-z'
     ].forEach(id => {
       const el = document.getElementById(id);
       if (el) {
@@ -941,6 +950,34 @@ export class UIHandler {
   // ── 光束控件绑定 ──────────────────────────────────
 
   _bindGodRaysControls() {
+    const beamSliderIds = [
+      'beam-origin-x', 'beam-origin-y', 'beam-origin-z',
+      'beam-target-x', 'beam-target-y', 'beam-target-z',
+      'beam-length', 'beam-radius', 'beam-intensity',
+      'beam-plane-count', 'beam-stripe-count', 'beam-stripe-strength',
+      'beam-noise-strength', 'beam-edge-softness',
+      'beam-attenuation', 'beam-drift-speed'
+    ];
+    beamSliderIds.forEach(id => {
+      const slider = document.getElementById(id);
+      const valSpan = document.getElementById(id + '-val');
+      if (!slider) return;
+      slider.addEventListener('input', () => {
+        if (valSpan) valSpan.textContent = slider.value;
+        this._applyLightBeamFromSliders();
+      });
+    });
+
+    const beamColorInput = document.getElementById('beam-color');
+    if (beamColorInput) {
+      beamColorInput.addEventListener('input', () => this._applyLightBeamFromSliders());
+    }
+
+    const beamHelperCheck = document.getElementById('beam-helper-visible');
+    const beamFollowCheck = document.getElementById('beam-follow-light');
+    if (beamHelperCheck) beamHelperCheck.addEventListener('change', () => this._applyLightBeamFromSliders());
+    if (beamFollowCheck) beamFollowCheck.addEventListener('change', () => this._applyLightBeamFromSliders());
+
     const sliderIds = [
       'godrays-density', 'godrays-max-density',
       'godrays-distance-attenuation', 'godrays-raymarch-steps'
@@ -962,8 +999,140 @@ export class UIHandler {
 
     const blurCheck = document.getElementById('godrays-blur');
     const gammaCheck = document.getElementById('godrays-gamma');
+    const postprocessCheck = document.getElementById('godrays-postprocess-enabled');
     if (blurCheck) blurCheck.addEventListener('change', () => this._applyGodRaysFromSliders());
     if (gammaCheck) gammaCheck.addEventListener('change', () => this._applyGodRaysFromSliders());
+    if (postprocessCheck) {
+      postprocessCheck.addEventListener('change', () => {
+        this.godRaysSystem.setEnabled(postprocessCheck.checked);
+        if (postprocessCheck.checked) {
+          this._prepareLightBeamDefaults();
+        }
+        this._applyGodRaysFromSliders();
+        this.updateStatus(postprocessCheck.checked ? '后处理光束: 开启' : '后处理光束: 关闭');
+      });
+    }
+  }
+
+  _prepareLightBeamDefaults() {
+    const beam = this.lightBeamSystem;
+    if (!beam) return;
+
+    let sourceLight = this.sceneManager.selectedLight || this.godRaysSystem?.light || null;
+    if (!sourceLight) {
+      this.scene.traverse((obj) => {
+        if (!sourceLight && obj.isPointLight) sourceLight = obj;
+      });
+    }
+
+    if (sourceLight) {
+      this.godRaysSystem?.setLight(sourceLight);
+      beam.setLight(sourceLight);
+    } else {
+      const dir = new THREE.Vector3();
+      this.camera.getWorldDirection(dir);
+      const origin = this.camera.position.clone().add(dir.clone().multiplyScalar(4));
+      origin.y += 2;
+      beam.setOrigin(origin.x, origin.y, origin.z);
+    }
+
+    const center = this.fbxHandler.getModelCenter?.();
+    const size = this.fbxHandler.getModelSize?.() || 0;
+    if (center) {
+      beam.setTarget(center.x, center.y, center.z);
+      if (size > 0) {
+        beam.length = Math.max(size * 1.6, 12);
+        beam.radius = Math.max(size * 0.28, 2.5);
+      }
+    }
+  }
+
+  _applyLightBeamFromSliders() {
+    const beam = this.lightBeamSystem;
+    if (!beam) return;
+
+    const originX = parseFloat(document.getElementById('beam-origin-x')?.value || 0);
+    const originY = parseFloat(document.getElementById('beam-origin-y')?.value || 6);
+    const originZ = parseFloat(document.getElementById('beam-origin-z')?.value || 0);
+    const targetX = parseFloat(document.getElementById('beam-target-x')?.value || 0);
+    const targetY = parseFloat(document.getElementById('beam-target-y')?.value || 0);
+    const targetZ = parseFloat(document.getElementById('beam-target-z')?.value || 0);
+    const length = parseFloat(document.getElementById('beam-length')?.value || 18);
+    const radius = parseFloat(document.getElementById('beam-radius')?.value || 4);
+    const intensity = parseFloat(document.getElementById('beam-intensity')?.value || 1.6);
+    const planeCount = parseFloat(document.getElementById('beam-plane-count')?.value || 10);
+    const stripeCount = parseFloat(document.getElementById('beam-stripe-count')?.value || 7);
+    const stripeStrength = parseFloat(document.getElementById('beam-stripe-strength')?.value || 0.65);
+    const noiseStrength = parseFloat(document.getElementById('beam-noise-strength')?.value || 0.35);
+    const edgeSoftness = parseFloat(document.getElementById('beam-edge-softness')?.value || 0.75);
+    const attenuation = parseFloat(document.getElementById('beam-attenuation')?.value || 1.15);
+    const driftSpeed = parseFloat(document.getElementById('beam-drift-speed')?.value || 0.08);
+    const color = document.getElementById('beam-color')?.value || '#ffe7b2';
+    const helperVisible = document.getElementById('beam-helper-visible')?.checked ?? true;
+    const followLight = document.getElementById('beam-follow-light')?.checked ?? true;
+
+    this._syncLightBeamFollowUI(followLight);
+
+    beam.followLight = followLight;
+    if (!followLight) beam.setOrigin(originX, originY, originZ);
+    beam.setTarget(targetX, targetY, targetZ);
+    beam.length = length;
+    beam.radius = radius;
+    beam.intensity = intensity;
+    beam.planeCount = planeCount;
+    beam.stripeCount = stripeCount;
+    beam.stripeStrength = stripeStrength;
+    beam.noiseStrength = noiseStrength;
+    beam.edgeSoftness = edgeSoftness;
+    beam.attenuation = attenuation;
+    beam.driftSpeed = driftSpeed;
+    beam.color = color;
+    beam.helperVisible = helperVisible;
+  }
+
+  _updateLightBeamSliders() {
+    const beam = this.lightBeamSystem;
+    if (!beam) return;
+    const params = beam.getParams();
+    const setSlider = (id, val) => {
+      const el = document.getElementById(id);
+      const valEl = document.getElementById(id + '-val');
+      const rounded = typeof val === 'number' ? +val.toFixed(2) : val;
+      if (el) el.value = rounded;
+      if (valEl) valEl.textContent = rounded;
+    };
+
+    setSlider('beam-origin-x', params.originX);
+    setSlider('beam-origin-y', params.originY);
+    setSlider('beam-origin-z', params.originZ);
+    setSlider('beam-target-x', params.targetX);
+    setSlider('beam-target-y', params.targetY);
+    setSlider('beam-target-z', params.targetZ);
+    setSlider('beam-length', params.length);
+    setSlider('beam-radius', params.radius);
+    setSlider('beam-intensity', params.intensity);
+    setSlider('beam-plane-count', params.planeCount);
+    setSlider('beam-stripe-count', params.stripeCount);
+    setSlider('beam-stripe-strength', params.stripeStrength);
+    setSlider('beam-noise-strength', params.noiseStrength);
+    setSlider('beam-edge-softness', params.edgeSoftness);
+    setSlider('beam-attenuation', params.attenuation);
+    setSlider('beam-drift-speed', params.driftSpeed);
+
+    const colorInput = document.getElementById('beam-color');
+    if (colorInput) colorInput.value = params.color;
+    const helperCheck = document.getElementById('beam-helper-visible');
+    if (helperCheck) helperCheck.checked = params.helperVisible;
+    const followCheck = document.getElementById('beam-follow-light');
+    if (followCheck) followCheck.checked = params.followLight;
+    this._syncLightBeamFollowUI(params.followLight);
+  }
+
+  _syncLightBeamFollowUI(followLight) {
+    ['beam-origin-x', 'beam-origin-y', 'beam-origin-z'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !!followLight;
+    });
   }
 
   _applyGodRaysFromSliders() {
@@ -1006,6 +1175,8 @@ export class UIHandler {
     if (blurCheck) blurCheck.checked = gr.blur;
     const gammaCheck = document.getElementById('godrays-gamma');
     if (gammaCheck) gammaCheck.checked = gr.gammaCorrection;
+    const postprocessCheck = document.getElementById('godrays-postprocess-enabled');
+    if (postprocessCheck) postprocessCheck.checked = gr.enabled;
   }
 
   // ── 遮挡板控件 ──────────────────────────────────
@@ -1023,7 +1194,6 @@ export class UIHandler {
           if (this.godRaysSystem && this.godRaysSystem.light) {
             oc.setLight(this.godRaysSystem.light);
           }
-          this._syncOccluderTargetToScene();
           oc.enable();
           if (oc.enabled) {
             btnGen.textContent = '👁 隐藏';
@@ -1121,7 +1291,7 @@ export class UIHandler {
           this.updateStatus('遮挡板目标：跟随相机');
         } else {
           this.updateStatus('遮挡板目标：手动控制');
-          this._syncOccluderTargetToScene();
+          // 同步 slider 值为当前 target
           this._updateOccluderTargetSliders();
         }
       });
@@ -1136,7 +1306,6 @@ export class UIHandler {
         const v = parseFloat(el.value);
         if (valEl) valEl.textContent = v;
         oc.target[axis] = v;
-        oc.update();
         this.updateStatus('遮挡板目标：手动 (' + oc.target.x.toFixed(0) + ', ' + oc.target.y.toFixed(0) + ', ' + oc.target.z.toFixed(0) + ')');
       });
     };
@@ -1193,14 +1362,6 @@ export class UIHandler {
     setSlider('occluder-target-z', t.z);
   }
 
-  _syncOccluderTargetToScene() {
-    const oc = this.occluderSystem;
-    if (!oc || document.getElementById('occluder-follow-camera')?.checked) return;
-    const center = this.fbxHandler.getModelCenter?.() || new THREE.Vector3(0, 0, 0);
-    oc.target.copy(center);
-    oc.update();
-  }
-
   /**
    * 根据图案类型显示/隐藏噪点专属控件
    */
@@ -1237,8 +1398,12 @@ export class UIHandler {
       this.smokeSystem.setSpread(size * 0.5);
       this._updateSmokeSliders();
 
-      this._syncOccluderTargetToScene();
-      this._updateOccluderTargetSliders();
+      if (this.lightBeamSystem) {
+        this.lightBeamSystem.setTarget(center.x, center.y, center.z);
+        this.lightBeamSystem.length = Math.max(size * 1.6, 12);
+        this.lightBeamSystem.radius = Math.max(size * 0.28, 2.5);
+        this._updateLightBeamSliders();
+      }
     }
   }
 
@@ -1254,11 +1419,14 @@ export class UIHandler {
       this.godRaysSystem.setLight(light);
     }
 
+    if (this.lightBeamSystem) {
+      this.lightBeamSystem.setLight(light);
+      this._updateLightBeamSliders();
+    }
+
     // 同步到遮挡板系统
     if (this.occluderSystem) {
       this.occluderSystem.setLight(light);
-      this._syncOccluderTargetToScene();
-      this._updateOccluderTargetSliders();
     }
 
     // 显示参数面板
@@ -1686,6 +1854,8 @@ export class UIHandler {
         this._applySmokeFromSliders();
       } else if (paramId.startsWith('godrays-')) {
         this._applyGodRaysFromSliders();
+      } else if (paramId.startsWith('beam-')) {
+        this._applyLightBeamSlider(paramId, value);
       } else if (paramId.startsWith('light-')) {
         this._applyLightFromSliders();
       } else if (paramId.startsWith('occluder-')) {
@@ -1760,6 +1930,32 @@ export class UIHandler {
       case 'occluder-rot-x': oc.rotX = value; break;
       case 'occluder-rot-y': oc.rotY = value; break;
       case 'occluder-rot-z': oc.rotZ = value; break;
+    }
+  }
+
+  /**
+   * 应用单个可见光束参数（用于时间线回放）
+   */
+  _applyLightBeamSlider(paramId, value) {
+    const beam = this.lightBeamSystem;
+    if (!beam) return;
+    switch (paramId) {
+      case 'beam-origin-x': beam.originX = value; break;
+      case 'beam-origin-y': beam.originY = value; break;
+      case 'beam-origin-z': beam.originZ = value; break;
+      case 'beam-target-x': beam.targetX = value; break;
+      case 'beam-target-y': beam.targetY = value; break;
+      case 'beam-target-z': beam.targetZ = value; break;
+      case 'beam-length': beam.length = value; break;
+      case 'beam-radius': beam.radius = value; break;
+      case 'beam-intensity': beam.intensity = value; break;
+      case 'beam-plane-count': beam.planeCount = value; break;
+      case 'beam-stripe-count': beam.stripeCount = value; break;
+      case 'beam-stripe-strength': beam.stripeStrength = value; break;
+      case 'beam-noise-strength': beam.noiseStrength = value; break;
+      case 'beam-edge-softness': beam.edgeSoftness = value; break;
+      case 'beam-attenuation': beam.attenuation = value; break;
+      case 'beam-drift-speed': beam.driftSpeed = value; break;
     }
   }
 

@@ -263,7 +263,114 @@
         </div>
       </div>
       <div class="tab-content" id="tab-godrays">
-        <div class="param-section-label">光束参数</div>
+        <div class="param-section-label">丁达尔光束</div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="beam-follow-light" checked>
+            跟随选中点光
+          </label>
+        </div>
+        <div class="param-section-label" style="font-size:0.75em;margin-top:2px">源点</div>
+        <div class="param-group">
+          <label class="param-label">源点 X</label>
+          <input type="range" id="beam-origin-x" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="beam-origin-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">源点 Y</label>
+          <input type="range" id="beam-origin-y" min="-40" max="40" step="0.1" value="6">
+          <span class="param-value" id="beam-origin-y-val">6</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">源点 Z</label>
+          <input type="range" id="beam-origin-z" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="beam-origin-z-val">0</span>
+        </div>
+        <div class="param-section-label" style="font-size:0.75em;margin-top:2px">目标方向</div>
+        <div class="param-group">
+          <label class="param-label">目标 X</label>
+          <input type="range" id="beam-target-x" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="beam-target-x-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">目标 Y</label>
+          <input type="range" id="beam-target-y" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="beam-target-y-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">目标 Z</label>
+          <input type="range" id="beam-target-z" min="-40" max="40" step="0.1" value="0">
+          <span class="param-value" id="beam-target-z-val">0</span>
+        </div>
+        <div class="param-section-label" style="font-size:0.75em;margin-top:2px">生成范围</div>
+        <div class="param-group">
+          <label class="param-label">长度</label>
+          <input type="range" id="beam-length" min="1" max="80" step="0.5" value="18">
+          <span class="param-value" id="beam-length-val">18</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">半径</label>
+          <input type="range" id="beam-radius" min="0.1" max="30" step="0.1" value="4">
+          <span class="param-value" id="beam-radius-val">4</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">强度</label>
+          <input type="range" id="beam-intensity" min="0" max="6" step="0.05" value="1.6">
+          <span class="param-value" id="beam-intensity-val">1.6</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">体积片数</label>
+          <input type="range" id="beam-plane-count" min="2" max="24" step="1" value="10">
+          <span class="param-value" id="beam-plane-count-val">10</span>
+        </div>
+        <div class="param-section-label" style="font-size:0.75em;margin-top:2px">光束纹理</div>
+        <div class="param-group">
+          <label class="param-label">条纹数量</label>
+          <input type="range" id="beam-stripe-count" min="0" max="24" step="1" value="7">
+          <span class="param-value" id="beam-stripe-count-val">7</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">条纹强度</label>
+          <input type="range" id="beam-stripe-strength" min="0" max="1" step="0.01" value="0.65">
+          <span class="param-value" id="beam-stripe-strength-val">0.65</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">烟尘噪声</label>
+          <input type="range" id="beam-noise-strength" min="0" max="1" step="0.01" value="0.35">
+          <span class="param-value" id="beam-noise-strength-val">0.35</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">边缘柔和</label>
+          <input type="range" id="beam-edge-softness" min="0" max="1" step="0.01" value="0.75">
+          <span class="param-value" id="beam-edge-softness-val">0.75</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">距离衰减</label>
+          <input type="range" id="beam-attenuation" min="0" max="4" step="0.05" value="1.15">
+          <span class="param-value" id="beam-attenuation-val">1.15</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">漂移速度</label>
+          <input type="range" id="beam-drift-speed" min="0" max="1" step="0.01" value="0.08">
+          <span class="param-value" id="beam-drift-speed-val">0.08</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">颜色</label>
+          <input type="color" id="beam-color" value="#ffe7b2">
+        </div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="beam-helper-visible" checked>
+            显示光束轴线
+          </label>
+        </div>
+        <div class="param-section-label">后处理光束</div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="godrays-postprocess-enabled">
+            启用屏幕空间后处理
+          </label>
+        </div>
         <div class="param-group">
           <label class="param-label">密度</label>
           <input type="range" id="godrays-density" min="0" max="0.3" step="0.001" value="0.08">
@@ -301,7 +408,7 @@
             伽马校正
           </label>
         </div>
-        <div class="param-hint" id="godrays-hint">调节遮挡板参数控制光束纹理图案</div>
+        <div class="param-hint" id="godrays-hint">生成遮挡板后，图案会直接切割丁达尔光束</div>
         <div class="param-section-label">遮挡板 <button id="btn-generate-occluder" class="style-btn" style="width:auto;flex:none;padding:4px 10px;font-size:0.8em;margin-left:6px">⬛ 生成</button></div>
         <div class="param-section-label" style="font-size:0.75em;margin-top:2px">图案类型</div>
         <div class="style-bar" id="occluder-pattern-bar">
@@ -408,23 +515,23 @@
         <div class="param-section-label">遮挡板目标</div>
         <div class="param-group">
           <label class="param-label">
-            <input type="checkbox" id="occluder-follow-camera">
-            📷 跟随相机目标
+            <input type="checkbox" id="occluder-follow-camera" checked>
+            📷 跟随相机
           </label>
         </div>
         <div class="param-group">
           <label class="param-label">目标 X</label>
-          <input type="range" id="occluder-target-x" min="-50" max="50" step="0.5" value="0">
+          <input type="range" id="occluder-target-x" min="-50" max="50" step="0.5" value="0" disabled>
           <span class="param-value" id="occluder-target-x-val">0</span>
         </div>
         <div class="param-group">
           <label class="param-label">目标 Y</label>
-          <input type="range" id="occluder-target-y" min="-50" max="50" step="0.5" value="0">
+          <input type="range" id="occluder-target-y" min="-50" max="50" step="0.5" value="0" disabled>
           <span class="param-value" id="occluder-target-y-val">0</span>
         </div>
         <div class="param-group">
           <label class="param-label">目标 Z</label>
-          <input type="range" id="occluder-target-z" min="-50" max="50" step="0.5" value="0">
+          <input type="range" id="occluder-target-z" min="-50" max="50" step="0.5" value="0" disabled>
           <span class="param-value" id="occluder-target-z-val">0</span>
         </div>
       </div>
@@ -560,6 +667,6 @@
     <div id="loading-text">加载中...</div>
   </div>
 
-  <script type="module" src="js/main.js?v=14"></script>
+  <script type="module" src="js/main.js?v=21"></script>
 </body>
 </html>

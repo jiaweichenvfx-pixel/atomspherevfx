@@ -15,6 +15,7 @@ import { UIHandler } from './UIHandler.js';
 import { ParticleSystem } from './ParticleSystem.js';
 import { SmokeSystem } from './SmokeSystem.js';
 import { GodRaysSystem } from './GodRaysSystem.js';
+import { LightBeamSystem } from './LightBeamSystem.js';
 import { OccluderSystem } from './OccluderSystem.js';
 import { TimelineSystem } from './TimelineSystem.js';
 import { ExportHandler } from './ExportHandler.js';
@@ -188,12 +189,16 @@ smokeSystem.setCamera(camera);
 smokeSystem.create();
 smokeSystem.updatePointScale(renderer.domElement.height);
 
-// 光束系统（后处理管线，延迟创建）
+// 旧式后处理光束系统（可选）
 const godRaysSystem = new GodRaysSystem(renderer, scene, camera);
+
+// 可见体积光束系统（VFX 主效果）
+const lightBeamSystem = new LightBeamSystem(scene);
 
 // 遮挡板系统（为光束提供阴影图案）
 const occluderSystem = new OccluderSystem(scene);
 occluderSystem.setParentGroup(sceneManager.objectsGroup);  // 场景对象列表集成
+lightBeamSystem.setOccluderSystem(occluderSystem);
 
 // 时间线系统（关键帧动画引擎）
 const timelineSystem = new TimelineSystem();
@@ -213,6 +218,7 @@ const uiHandler = new UIHandler({
   particleSystem,
   smokeSystem,
   godRaysSystem,
+  lightBeamSystem,
   occluderSystem,
   timelineSystem,
   exportHandler,
@@ -259,11 +265,14 @@ function animate() {
   // 更新烟雾
   smokeSystem.update(deltaTime);
 
+  // 更新场景内可见光束
+  lightBeamSystem.update(deltaTime);
+
   // 更新遮挡板目标（跟随相机或手动控制）
   const followChk = document.getElementById('occluder-follow-camera');
-  if (followChk?.checked) {
+  if (!followChk || followChk.checked) {
     const fbxCamPos = fbxHandler.getActiveCameraWorldPosition(new THREE.Vector3());
-    occluderSystem.target.copy(fbxCamPos || camera.position);
+    occluderSystem._target.copy(fbxCamPos || camera.position);
   }
 
   // 更新遮挡板位置——但如果 TransformControls 正在控制遮挡板则跳过自动更新
@@ -429,6 +438,7 @@ if (typeof window !== 'undefined') {
     particleSystem,
     smokeSystem,
     godRaysSystem,
+    lightBeamSystem,
     occluderSystem,
     exportHandler,
     updateExportFrameBorder,
