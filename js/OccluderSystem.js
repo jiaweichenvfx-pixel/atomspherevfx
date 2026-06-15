@@ -602,14 +602,19 @@ export class OccluderSystem {
   }
 
   /**
-   * 将遮挡板放置在光源前方，朝向目标点（默认原点，通常设为相机位置）
+   * 将遮挡板放置在光源前方，朝向场景目标点。
    */
   _updatePosition() {
     if (!this._mesh || !this._light) return;
 
     // 光源指向目标点的方向
     const lightPos = this._light.position;
-    const dir = new THREE.Vector3().subVectors(this._target, lightPos).normalize();
+    const dir = new THREE.Vector3().subVectors(this._target, lightPos);
+    if (dir.lengthSq() < 1e-8) {
+      dir.set(0, 0, -1);
+    } else {
+      dir.normalize();
+    }
 
     // 遮挡板位置：光源 + 方向 * 距离
     const occluderPos = lightPos.clone().add(
@@ -617,7 +622,9 @@ export class OccluderSystem {
     );
 
     // 应用偏移（在垂直于光线的平面上）
-    const up = new THREE.Vector3(0, 1, 0);
+    const up = Math.abs(dir.y) > 0.98
+      ? new THREE.Vector3(1, 0, 0)
+      : new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(dir, up).normalize();
     const correctedUp = new THREE.Vector3().crossVectors(right, dir).normalize();
 

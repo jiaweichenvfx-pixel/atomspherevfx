@@ -1023,6 +1023,7 @@ export class UIHandler {
           if (this.godRaysSystem && this.godRaysSystem.light) {
             oc.setLight(this.godRaysSystem.light);
           }
+          this._syncOccluderTargetToScene();
           oc.enable();
           if (oc.enabled) {
             btnGen.textContent = '👁 隐藏';
@@ -1120,7 +1121,7 @@ export class UIHandler {
           this.updateStatus('遮挡板目标：跟随相机');
         } else {
           this.updateStatus('遮挡板目标：手动控制');
-          // 同步 slider 值为当前 target
+          this._syncOccluderTargetToScene();
           this._updateOccluderTargetSliders();
         }
       });
@@ -1135,6 +1136,7 @@ export class UIHandler {
         const v = parseFloat(el.value);
         if (valEl) valEl.textContent = v;
         oc.target[axis] = v;
+        oc.update();
         this.updateStatus('遮挡板目标：手动 (' + oc.target.x.toFixed(0) + ', ' + oc.target.y.toFixed(0) + ', ' + oc.target.z.toFixed(0) + ')');
       });
     };
@@ -1191,6 +1193,14 @@ export class UIHandler {
     setSlider('occluder-target-z', t.z);
   }
 
+  _syncOccluderTargetToScene() {
+    const oc = this.occluderSystem;
+    if (!oc || document.getElementById('occluder-follow-camera')?.checked) return;
+    const center = this.fbxHandler.getModelCenter?.() || new THREE.Vector3(0, 0, 0);
+    oc.target.copy(center);
+    oc.update();
+  }
+
   /**
    * 根据图案类型显示/隐藏噪点专属控件
    */
@@ -1226,6 +1236,9 @@ export class UIHandler {
       this.smokeSystem.setCenter(center.x, center.y - size * 0.3, center.z);
       this.smokeSystem.setSpread(size * 0.5);
       this._updateSmokeSliders();
+
+      this._syncOccluderTargetToScene();
+      this._updateOccluderTargetSliders();
     }
   }
 
@@ -1244,6 +1257,8 @@ export class UIHandler {
     // 同步到遮挡板系统
     if (this.occluderSystem) {
       this.occluderSystem.setLight(light);
+      this._syncOccluderTargetToScene();
+      this._updateOccluderTargetSliders();
     }
 
     // 显示参数面板

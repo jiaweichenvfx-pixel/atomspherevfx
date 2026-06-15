@@ -261,9 +261,9 @@ function animate() {
 
   // 更新遮挡板目标（跟随相机或手动控制）
   const followChk = document.getElementById('occluder-follow-camera');
-  if (!followChk || followChk.checked) {
+  if (followChk?.checked) {
     const fbxCamPos = fbxHandler.getActiveCameraWorldPosition(new THREE.Vector3());
-    occluderSystem._target.copy(fbxCamPos || camera.position);
+    occluderSystem.target.copy(fbxCamPos || camera.position);
   }
 
   // 更新遮挡板位置——但如果 TransformControls 正在控制遮挡板则跳过自动更新
