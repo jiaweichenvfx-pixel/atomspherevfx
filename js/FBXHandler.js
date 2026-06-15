@@ -289,6 +289,62 @@ export class FBXHandler {
   }
 
   /**
+   * 获取当前最适合用于导出的动画片段。
+   * @returns {THREE.AnimationClip|null}
+   */
+  getPreferredAnimationClip() {
+    return this.getActiveAnimationClip() || this.animations[0] || null;
+  }
+
+  /**
+   * 根据动画轨道时间采样推算 FPS。
+   * @param {number} fallback
+   * @returns {number}
+   */
+  getActiveAnimationFPS(fallback = 30) {
+    const clip = this.getPreferredAnimationClip();
+    if (!clip || !Array.isArray(clip.tracks)) return fallback;
+
+    const deltas = [];
+    for (const track of clip.tracks) {
+      const times = track?.times;
+      if (!times || times.length < 2) continue;
+      for (let i = 1; i < times.length; i++) {
+        const delta = times[i] - times[i - 1];
+        if (delta > 1e-4) deltas.push(delta);
+      }
+    }
+
+    if (deltas.length === 0) return fallback;
+    deltas.sort((a, b) => a - b);
+    const mid = Math.floor(deltas.length / 2);
+    const medianDelta = deltas.length % 2 === 0
+      ? (deltas[mid - 1] + deltas[mid]) / 2
+      : deltas[mid];
+    if (!isFinite(medianDelta) || medianDelta <= 0) return fallback;
+
+    const inferred = Math.round(1 / medianDelta);
+    return Math.max(1, Math.min(120, inferred || fallback));
+  }
+
+  /**
+   * 导出预设：匹配当前 FBX 动画时长和 FPS。
+   * @param {number} fallbackFps
+   * @returns {{duration:number, fps:number, clipName:string}|null}
+   */
+  getImportedAnimationExportPreset(fallbackFps = 30) {
+    const clip = this.getPreferredAnimationClip();
+    if (!clip) return null;
+    const duration = clip.duration || 0;
+    if (duration <= 0) return null;
+    return {
+      duration,
+      fps: this.getActiveAnimationFPS(fallbackFps),
+      clipName: clip.name || 'FBX 动画'
+    };
+  }
+
+  /**
    * 是否需要把当前 FBX 摄像机动画同步到主相机。
    * @returns {boolean}
    */

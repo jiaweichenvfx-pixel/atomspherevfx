@@ -1577,14 +1577,24 @@ export class UIHandler {
         document.getElementById('export-bg').checked = false;
         document.getElementById('export-grid').checked = false;
         document.getElementById('export-video').checked = false;
-        document.getElementById('export-duration').value = 10;
-        // 同步导出 FPS 与时间线 FPS
-        const exportFpsInput = document.getElementById('export-fps');
-        const timelineFpsInput = document.getElementById('timeline-fps');
-        if (exportFpsInput && timelineFpsInput) {
-          exportFpsInput.value = timelineFpsInput.value;
+        if (!this._applyImportedAnimationExportPreset({ silent: true })) {
+          document.getElementById('export-duration').value = 10;
+          // 同步导出 FPS 与时间线 FPS
+          const exportFpsInput = document.getElementById('export-fps');
+          const timelineFpsInput = document.getElementById('timeline-fps');
+          if (exportFpsInput && timelineFpsInput) {
+            exportFpsInput.value = timelineFpsInput.value;
+          }
+          this._setExportPresetInfo('手动');
         }
         modal.classList.remove('hidden');
+      });
+    }
+
+    const btnMatchAnimation = document.getElementById('btn-export-match-animation');
+    if (btnMatchAnimation) {
+      btnMatchAnimation.addEventListener('click', () => {
+        this._applyImportedAnimationExportPreset({ silent: false });
       });
     }
 
@@ -1600,7 +1610,7 @@ export class UIHandler {
     const btnStart = document.getElementById('btn-export-start');
     if (btnStart) {
       btnStart.addEventListener('click', () => {
-        const duration = parseInt(document.getElementById('export-duration').value) || 10;
+        const duration = parseFloat(document.getElementById('export-duration').value) || 10;
         const showBg = document.getElementById('export-bg').checked;
         const showGrid = document.getElementById('export-grid').checked;
         const showVideo = document.getElementById('export-video').checked;
@@ -1613,7 +1623,7 @@ export class UIHandler {
         const ok = this.exportHandler.exportVideo({
           width: fw,
           height: fh,
-          duration: Math.max(1, Math.min(120, duration)),
+          duration: Math.max(0.01, Math.min(3600, duration)),
           fps: fps,
           showBackground: showBg,
           showGrid: showGrid,
@@ -1623,7 +1633,7 @@ export class UIHandler {
         if (!ok) {
           this.updateStatus('输出不支持 (请使用 Chrome/Firefox)');
         } else {
-          this.updateStatus(`输出中... ${duration}s  分辨率 ${fw}×${fh}`);
+          this.updateStatus(`输出中... ${duration.toFixed(2)}s @ ${fps}fps  分辨率 ${fw}×${fh}`);
         }
       });
     }
@@ -1637,6 +1647,57 @@ export class UIHandler {
     };
     if (fwInput) fwInput.addEventListener('input', updateBorder);
     if (fhInput) fhInput.addEventListener('input', updateBorder);
+  }
+
+  _setExportPresetInfo(text) {
+    const info = document.getElementById('export-animation-preset-info');
+    if (info) info.textContent = text;
+  }
+
+  _formatPresetDuration(seconds) {
+    return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(2);
+  }
+
+  _applyImportedAnimationExportPreset({ silent = false } = {}) {
+    const fallbackFps = this._fps || 30;
+    const preset = this.fbxHandler.getImportedAnimationExportPreset?.(fallbackFps);
+    if (!preset) {
+      this._setExportPresetInfo('未检测');
+      if (!silent) this.updateStatus('没有检测到可用于输出的 FBX 动画');
+      return false;
+    }
+
+    const duration = Math.max(0.01, Math.min(3600, preset.duration));
+    const fps = Math.max(1, Math.min(120, Math.round(preset.fps || fallbackFps)));
+    const durationValue = this._formatPresetDuration(duration);
+
+    const exportDurationInput = document.getElementById('export-duration');
+    const exportFpsInput = document.getElementById('export-fps');
+    if (exportDurationInput) exportDurationInput.value = durationValue;
+    if (exportFpsInput) exportFpsInput.value = fps;
+
+    const timelineDurationInput = document.getElementById('timeline-duration');
+    const timelineFpsInput = document.getElementById('timeline-fps');
+    if (timelineDurationInput) timelineDurationInput.value = durationValue;
+    if (timelineFpsInput) timelineFpsInput.value = fps;
+
+    if (this.timelineSystem) {
+      this.timelineSystem.duration = duration;
+      if (this.timelineSystem.currentTime > duration) {
+        this.timelineSystem.setTime(duration);
+      }
+      const scrubber = document.getElementById('timeline-scrubber');
+      if (scrubber) scrubber.max = duration;
+      this._fps = fps;
+      this._updateTimeDisplay();
+      this._updateKeyframeMarkers();
+    }
+
+    this._setExportPresetInfo(`${preset.clipName}: ${durationValue}s @ ${fps}fps`);
+    if (!silent) {
+      this.updateStatus(`输出预设已匹配导入动画: ${durationValue}s @ ${fps}fps`);
+    }
+    return true;
   }
 
   _onExportRecordingState(state) {
