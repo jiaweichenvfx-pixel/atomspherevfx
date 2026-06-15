@@ -505,7 +505,7 @@ export class ParticleSystem {
   }
 
   /** 每帧更新 */
-  update(deltaTime) {
+  update(deltaTime, options = {}) {
     if (!this.particles || !this._enabled) return;
 
     const pos = this.particles.geometry.attributes.position.array;
@@ -517,7 +517,9 @@ export class ParticleSystem {
     const driftZ = this._drift.z;
     const turbAmount = this._turbulence;
     const rotSpeedGlobal = this._rotationSpeed;
-    const now = performance.now() * 0.001;
+    const now = Number.isFinite(options.timeSeconds)
+      ? options.timeSeconds
+      : performance.now() * 0.001;
 
     for (let i = 0; i < this._count; i++) {
       const d = this._particleData[i];

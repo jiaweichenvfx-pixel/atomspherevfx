@@ -322,11 +322,13 @@ export class SmokeSystem {
   }
 
   /** 每帧更新 */
-  update(deltaTime) {
+  update(deltaTime, options = {}) {
     if (!this._enabled || this._planes.length === 0) return;
 
     const dt = Math.min(deltaTime, 0.1);
-    const time = performance.now() * 0.001;
+    const time = Number.isFinite(options.timeSeconds)
+      ? options.timeSeconds
+      : performance.now() * 0.001;
     const cx = this._center.x;
     const cy = this._center.y;
     const cz = this._center.z;

@@ -265,9 +265,13 @@ export class LightBeamSystem {
     if (this._helperGroup) this._helperGroup.visible = this._enabled && this._params.helperVisible;
   }
 
-  update(deltaTime) {
+  update(deltaTime, options = {}) {
     if (!this._group) return;
-    this._time += deltaTime;
+    if (Number.isFinite(options.timeSeconds)) {
+      this._time = options.timeSeconds;
+    } else {
+      this._time += deltaTime;
+    }
     this._setUniform('uTime', this._time);
     this._syncOccluderUniforms();
 

@@ -31,6 +31,7 @@ export class UIHandler {
     this.renderer = renderer;
     this.camera = camera;
     this.scene = scene;
+    this._exportDirectoryHandle = null;
 
     // 在各模块就绪前挂起 DOMContentLoaded
     if (document.readyState === 'loading') {
@@ -1598,6 +1599,13 @@ export class UIHandler {
       });
     }
 
+    const btnChooseDir = document.getElementById('btn-export-choose-dir');
+    if (btnChooseDir) {
+      btnChooseDir.addEventListener('click', async () => {
+        await this._chooseFrameSequenceOutputDirectory();
+      });
+    }
+
     // 取消
     const btnCancel = document.getElementById('btn-export-cancel');
     if (btnCancel) {
@@ -1610,30 +1618,61 @@ export class UIHandler {
     const btnStart = document.getElementById('btn-export-start');
     if (btnStart) {
       btnStart.addEventListener('click', () => {
-        const duration = parseFloat(document.getElementById('export-duration').value) || 10;
-        const showBg = document.getElementById('export-bg').checked;
-        const showGrid = document.getElementById('export-grid').checked;
-        const showVideo = document.getElementById('export-video').checked;
-        const fw = parseInt(document.getElementById('frame-width').value) || 1920;
-        const fh = parseInt(document.getElementById('frame-height').value) || 1080;
-        const fps = parseInt(document.getElementById('export-fps').value) || 30;
+        const opts = this._getExportOptionsFromModal();
 
         modal.classList.add('hidden');
 
         const ok = this.exportHandler.exportVideo({
-          width: fw,
-          height: fh,
-          duration: Math.max(0.01, Math.min(3600, duration)),
-          fps: fps,
-          showBackground: showBg,
-          showGrid: showGrid,
-          showVideo: showVideo
+          width: opts.width,
+          height: opts.height,
+          duration: opts.duration,
+          fps: opts.fps,
+          showBackground: opts.showBackground,
+          showGrid: opts.showGrid,
+          showVideo: opts.showVideo
         });
 
         if (!ok) {
           this.updateStatus('输出不支持 (请使用 Chrome/Firefox)');
         } else {
-          this.updateStatus(`输出中... ${duration.toFixed(2)}s @ ${fps}fps  分辨率 ${fw}×${fh}`);
+          this.updateStatus(`录制视频中... ${opts.duration.toFixed(2)}s @ ${opts.fps}fps  分辨率 ${opts.width}×${opts.height}`);
+        }
+      });
+    }
+
+    const btnFrameSequence = document.getElementById('btn-export-frame-sequence');
+    if (btnFrameSequence) {
+      btnFrameSequence.addEventListener('click', async () => {
+        const opts = this._getExportOptionsFromModal();
+        if (!this._exportDirectoryHandle && this._supportsDirectoryPicker()) {
+          this._setExportOutputDirInfo('未选择，下载 ZIP');
+        }
+        const playbackState = this._captureExportPlaybackState();
+        modal.classList.add('hidden');
+
+        try {
+          this.timelineSystem?.pause();
+          this.fbxHandler.setAnimationPlaying(false);
+          const ok = await this.exportHandler.exportFrameSequence({
+            width: opts.width,
+            height: opts.height,
+            duration: opts.duration,
+            fps: opts.fps,
+            showBackground: opts.showBackground,
+            showGrid: opts.showGrid,
+            showVideo: opts.showVideo,
+            filenamePrefix: 'atmosphereFX',
+            outputDirectoryHandle: this._exportDirectoryHandle,
+            renderFrame: (frameInfo) => this._renderExactExportFrame(frameInfo)
+          });
+          this.updateStatus(ok
+            ? `逐帧 PNG 已导出: ${Math.round(opts.duration * opts.fps)} 帧 @ ${opts.fps}fps`
+            : '逐帧导出已取消或不可用');
+        } catch (err) {
+          console.error('逐帧导出失败:', err);
+          this.updateStatus(`逐帧导出失败: ${err.message}`);
+        } finally {
+          this._restoreExportPlaybackState(playbackState);
         }
       });
     }
@@ -1647,6 +1686,165 @@ export class UIHandler {
     };
     if (fwInput) fwInput.addEventListener('input', updateBorder);
     if (fhInput) fhInput.addEventListener('input', updateBorder);
+  }
+
+  _supportsDirectoryPicker() {
+    return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function';
+  }
+
+  async _chooseFrameSequenceOutputDirectory({ silentFallback = false } = {}) {
+    if (!this._supportsDirectoryPicker()) {
+      this._exportDirectoryHandle = null;
+      this._setExportOutputDirInfo('不支持，使用 ZIP');
+      if (!silentFallback) {
+        this.updateStatus('当前浏览器不支持选择输出文件夹，将使用 ZIP 下载');
+      }
+      return false;
+    }
+
+    try {
+      const handle = await this._openDirectoryPicker();
+      const permission = await this._ensureDirectoryWritePermission(handle);
+      if (!permission) {
+        this._exportDirectoryHandle = null;
+        this._setExportOutputDirInfo('权限不足，使用 ZIP');
+        this.updateStatus('输出文件夹没有写入权限，将使用 ZIP 下载');
+        return false;
+      }
+      this._exportDirectoryHandle = handle;
+      this._setExportOutputDirInfo(handle.name || '已选择');
+      this.updateStatus(`逐帧输出文件夹: ${handle.name || '已选择'}`);
+      return true;
+    } catch (err) {
+      this._exportDirectoryHandle = null;
+      if (err?.name === 'AbortError') {
+        return false;
+      }
+      if (err?.name === 'SecurityError' || err?.name === 'NotAllowedError') {
+        this._setExportOutputDirInfo('浏览器限制，使用 ZIP');
+        this.updateStatus('当前浏览器阻止选择输出文件夹，将使用 ZIP 下载');
+        return false;
+      }
+      this._setExportOutputDirInfo('选择失败，使用 ZIP');
+      console.warn('选择输出文件夹失败:', err);
+      this.updateStatus(`选择输出文件夹失败: ${err?.message || err}`);
+      return false;
+    }
+  }
+
+  async _openDirectoryPicker() {
+    try {
+      return await window.showDirectoryPicker({
+        id: 'atmospherefx-frame-output',
+        mode: 'readwrite'
+      });
+    } catch (err) {
+      // Some Chromium builds expose showDirectoryPicker but reject newer options.
+      if (err instanceof TypeError) {
+        return await window.showDirectoryPicker();
+      }
+      throw err;
+    }
+  }
+
+  async _ensureDirectoryWritePermission(handle) {
+    if (!handle) return false;
+    try {
+      if (typeof handle.queryPermission === 'function') {
+        const current = await handle.queryPermission({ mode: 'readwrite' });
+        if (current === 'granted') return true;
+      }
+      if (typeof handle.requestPermission === 'function') {
+        const next = await handle.requestPermission({ mode: 'readwrite' });
+        return next === 'granted';
+      }
+      return true;
+    } catch (err) {
+      console.warn('输出文件夹权限检查失败:', err);
+      return false;
+    }
+  }
+
+  _setExportOutputDirInfo(text) {
+    const info = document.getElementById('export-output-dir-info');
+    if (info) info.textContent = text;
+  }
+
+  _getExportOptionsFromModal() {
+    const duration = parseFloat(document.getElementById('export-duration').value) || 10;
+    const fps = parseInt(document.getElementById('export-fps').value) || 30;
+    return {
+      duration: Math.max(0.01, Math.min(3600, duration)),
+      fps: Math.max(1, Math.min(120, Math.round(fps))),
+      showBackground: document.getElementById('export-bg').checked,
+      showGrid: document.getElementById('export-grid').checked,
+      showVideo: document.getElementById('export-video').checked,
+      width: parseInt(document.getElementById('frame-width').value) || 1920,
+      height: parseInt(document.getElementById('frame-height').value) || 1080
+    };
+  }
+
+  _captureExportPlaybackState() {
+    return {
+      timelineTime: this.timelineSystem?.currentTime || 0,
+      timelinePlaying: this.timelineSystem?.isPlaying || false,
+      fbxPlaying: this.fbxHandler.animationPlaying
+    };
+  }
+
+  _restoreExportPlaybackState(state) {
+    if (!state) return;
+    if (this.timelineSystem) {
+      this.timelineSystem.setTime(state.timelineTime);
+      if (state.timelinePlaying) this.timelineSystem.play();
+      else this.timelineSystem.pause();
+    }
+    const fbxDuration = this.fbxHandler.getActiveAnimationDuration();
+    if (fbxDuration > 0) {
+      this.fbxHandler.setAnimationTime(Math.min(state.timelineTime, fbxDuration));
+    }
+    this.fbxHandler.setAnimationPlaying(state.fbxPlaying);
+    const playBtn = document.getElementById('timeline-play');
+    if (playBtn) playBtn.textContent = state.timelinePlaying ? '⏸' : '▶';
+  }
+
+  _renderExactExportFrame({ time, deltaTime }) {
+    if (this.timelineSystem) {
+      this.timelineSystem.setTime(Math.min(time, this.timelineSystem.duration));
+    }
+
+    const fbxDuration = this.fbxHandler.getActiveAnimationDuration();
+    if (fbxDuration > 0) {
+      this.fbxHandler.setAnimationTime(Math.min(time, fbxDuration));
+    }
+
+    if (this.fbxHandler.shouldFollowActiveCamera()) {
+      const camInfo = this.fbxHandler.getActiveCameraInfo();
+      if (camInfo?.camera) {
+        const modelCenter = this.fbxHandler.shouldAimActiveCameraAtModel()
+          ? this.fbxHandler.getModelCenter()
+          : null;
+        this.orbitController.setFromCamera(camInfo.camera, {
+          copyProjection: true,
+          lookTarget: modelCenter,
+          targetDistance: Math.max(this.fbxHandler.getModelSize(), 10)
+        });
+      }
+    }
+
+    this.orbitController.update();
+    this.particleSystem.update(deltaTime, { timeSeconds: time });
+    this.smokeSystem.update(deltaTime, { timeSeconds: time });
+    this.lightBeamSystem.update(deltaTime, { timeSeconds: time });
+
+    const followChk = document.getElementById('occluder-follow-camera');
+    if (!followChk || followChk.checked) {
+      const fbxCamPos = this.fbxHandler.getActiveCameraWorldPosition(new THREE.Vector3());
+      this.occluderSystem._target.copy(fbxCamPos || this.camera.position);
+    }
+    this.occluderSystem.update();
+
+    this.godRaysSystem.render();
   }
 
   _setExportPresetInfo(text) {
@@ -1708,7 +1906,11 @@ export class UIHandler {
     if (state.isRecording) {
       btn.classList.add('primary');
       btn.classList.add('recording');
-      if (label) label.textContent = `停止 ${state.remaining}s`;
+      if (label) {
+        label.textContent = state.mode === 'frames'
+          ? `停止 ${state.frame || 0}/${state.frameCount || state.total || 0}`
+          : `停止 ${state.remaining}s`;
+      }
     } else {
       btn.classList.remove('primary');
       btn.classList.remove('recording');

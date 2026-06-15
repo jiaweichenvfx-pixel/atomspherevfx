@@ -235,6 +235,8 @@ statusRenderer.textContent = rendererBackend;
 function animate() {
   requestAnimationFrame(animate);
 
+  if (exportHandler.isFrameSequenceExporting) return;
+
   const deltaTime = Math.min(clock.getDelta(), 0.1); // 防止大帧跳跃
 
   // 时间线动画驱动（先于其他更新，确保参数插值后立即应用到各系统）

@@ -28,6 +28,8 @@ export class ExportHandler {
     this._onRecordingStateChange = null;
     this._savedOccluderHelperVis = undefined;
     this._savedLightBeamHelperVis = undefined;
+    this._isFrameSequenceExporting = false;
+    this._cancelFrameSequence = false;
   }
 
   setCamera(camera) { this._camera = camera; }
@@ -107,6 +109,10 @@ export class ExportHandler {
   }
 
   stopRecording() {
+    if (this._isFrameSequenceExporting) {
+      this._cancelFrameSequence = true;
+      return true;
+    }
     if (!this._isRecording || !this._mediaRecorder) return false;
 
     if (this._mediaRecorder.state === 'recording') {
@@ -132,7 +138,115 @@ export class ExportHandler {
 
   // ── 状态查询 ──────────────────────────────────
 
-  get isRecording() { return this._isRecording; }
+  get isRecording() { return this._isRecording || this._isFrameSequenceExporting; }
+  get isFrameSequenceExporting() { return this._isFrameSequenceExporting; }
+
+  // ── 逐帧 PNG 序列导出 ─────────────────────────
+
+  async exportFrameSequence(options) {
+    if (this._isRecording || this._isFrameSequenceExporting) return false;
+
+    const {
+      width,
+      height,
+      duration,
+      fps = 30,
+      showBackground,
+      showGrid,
+      showVideo,
+      filenamePrefix = 'atmosphereFX',
+      renderFrame,
+      outputDirectoryHandle = null
+    } = options;
+
+    if (typeof renderFrame !== 'function' || !this._renderer.domElement.toBlob) {
+      console.warn('ExportHandler: 逐帧导出不可用');
+      return false;
+    }
+
+    const validFps = Math.max(1, Math.min(120, Math.round(fps)));
+    const validDuration = Math.max(0.01, Math.min(3600, duration));
+    const frameCount = Math.max(1, Math.round(validDuration * validFps));
+    const frameDelta = 1 / validFps;
+    const outputRoot = outputDirectoryHandle || null;
+    const useDirectoryOutput = !!outputRoot;
+    let exportDirectory = null;
+
+    this._savedState = this._captureState();
+    this._isFrameSequenceExporting = true;
+    this._cancelFrameSequence = false;
+    let completed = false;
+
+    try {
+      this._applyExportState(width, height, showBackground, showGrid, showVideo);
+
+      const pad = String(frameCount).length;
+      if (useDirectoryOutput) {
+        exportDirectory = await this._prepareExportDirectory(outputRoot, filenamePrefix, validFps, frameCount);
+      }
+
+      const files = [];
+      for (let frame = 0; frame < frameCount; frame++) {
+        if (this._cancelFrameSequence) break;
+
+        const time = frame * frameDelta;
+        await renderFrame({
+          frame,
+          frameNumber: frame + 1,
+          frameCount,
+          time,
+          deltaTime: frame === 0 ? 0 : frameDelta,
+          fps: validFps
+        });
+
+        const blob = await this._canvasToBlob('image/png');
+        const name = `${filenamePrefix}_${String(frame + 1).padStart(pad, '0')}.png`;
+        if (useDirectoryOutput && exportDirectory) {
+          await this._writeBlobToDirectory(exportDirectory, name, blob);
+        } else {
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          files.push({ name, bytes });
+        }
+
+        if (this._onRecordingStateChange) {
+          this._onRecordingStateChange({
+            isRecording: true,
+            mode: 'frames',
+            frame: frame + 1,
+            frameCount,
+            remaining: frameCount - frame - 1,
+            total: frameCount
+          });
+        }
+
+        // 给浏览器一点喘息时间，否则大序列会让 UI 完全无响应。
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      if (!this._cancelFrameSequence) {
+        if (useDirectoryOutput && exportDirectory) {
+          completed = true;
+        } else if (files.length > 0) {
+          const zip = this._buildZip(files);
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          this._triggerDownload(zip, `${filenamePrefix}-${ts}-${validFps}fps-${files.length}frames.zip`);
+          completed = true;
+        }
+      }
+    } catch (err) {
+      console.error('ExportHandler: 逐帧导出失败', err);
+      throw err;
+    } finally {
+      this._restoreState();
+      this._isFrameSequenceExporting = false;
+      this._cancelFrameSequence = false;
+      if (this._onRecordingStateChange) {
+        this._onRecordingStateChange({ isRecording: false, mode: 'frames', remaining: 0, total: 0 });
+      }
+    }
+
+    return completed;
+  }
 
   // ── 销毁 ──────────────────────────────────────
 
@@ -366,6 +480,147 @@ export class ExportHandler {
     if (blobOrUrl instanceof Blob) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
+  }
+
+  _canvasToBlob(type) {
+    return new Promise((resolve, reject) => {
+      this._renderer.domElement.toBlob(blob => {
+        if (blob) resolve(blob);
+        else reject(new Error('Canvas toBlob failed'));
+      }, type);
+    });
+  }
+
+  async _prepareExportDirectory(rootHandle, prefix, fps, frameCount) {
+    if (!rootHandle) return null;
+    const perm = await this._ensureDirectoryWritePermission(rootHandle);
+    if (!perm) {
+      throw new Error('没有输出文件夹写入权限');
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const dirName = `${prefix}-${ts}-${fps}fps-${frameCount}frames`;
+    return await rootHandle.getDirectoryHandle(dirName, { create: true });
+  }
+
+  async _ensureDirectoryWritePermission(handle) {
+    if (!handle) return false;
+    if (typeof handle.queryPermission === 'function') {
+      const current = await handle.queryPermission({ mode: 'readwrite' });
+      if (current === 'granted') return true;
+    }
+    if (typeof handle.requestPermission === 'function') {
+      const next = await handle.requestPermission({ mode: 'readwrite' });
+      return next === 'granted';
+    }
+    return false;
+  }
+
+  async _writeBlobToDirectory(directoryHandle, filename, blob) {
+    const fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  }
+
+  _buildZip(files) {
+    const chunks = [];
+    const central = [];
+    let offset = 0;
+    const encoder = new TextEncoder();
+    const { time, date } = this._dosDateTime(new Date());
+
+    for (const file of files) {
+      const nameBytes = encoder.encode(file.name);
+      const crc = this._crc32(file.bytes);
+      const local = new Uint8Array(30 + nameBytes.length);
+      const localView = new DataView(local.buffer);
+      localView.setUint32(0, 0x04034b50, true);
+      localView.setUint16(4, 20, true);
+      localView.setUint16(6, 0, true);
+      localView.setUint16(8, 0, true);
+      localView.setUint16(10, time, true);
+      localView.setUint16(12, date, true);
+      localView.setUint32(14, crc, true);
+      localView.setUint32(18, file.bytes.length, true);
+      localView.setUint32(22, file.bytes.length, true);
+      localView.setUint16(26, nameBytes.length, true);
+      localView.setUint16(28, 0, true);
+      local.set(nameBytes, 30);
+      chunks.push(local, file.bytes);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      const centralView = new DataView(centralHeader.buffer);
+      centralView.setUint32(0, 0x02014b50, true);
+      centralView.setUint16(4, 20, true);
+      centralView.setUint16(6, 20, true);
+      centralView.setUint16(8, 0, true);
+      centralView.setUint16(10, 0, true);
+      centralView.setUint16(12, time, true);
+      centralView.setUint16(14, date, true);
+      centralView.setUint32(16, crc, true);
+      centralView.setUint32(20, file.bytes.length, true);
+      centralView.setUint32(24, file.bytes.length, true);
+      centralView.setUint16(28, nameBytes.length, true);
+      centralView.setUint16(30, 0, true);
+      centralView.setUint16(32, 0, true);
+      centralView.setUint16(34, 0, true);
+      centralView.setUint16(36, 0, true);
+      centralView.setUint32(38, 0, true);
+      centralView.setUint32(42, offset, true);
+      centralHeader.set(nameBytes, 46);
+      central.push(centralHeader);
+
+      offset += local.length + file.bytes.length;
+    }
+
+    const centralOffset = offset;
+    let centralSize = 0;
+    for (const header of central) centralSize += header.length;
+    chunks.push(...central);
+
+    const eocd = new Uint8Array(22);
+    const eocdView = new DataView(eocd.buffer);
+    eocdView.setUint32(0, 0x06054b50, true);
+    eocdView.setUint16(4, 0, true);
+    eocdView.setUint16(6, 0, true);
+    eocdView.setUint16(8, files.length, true);
+    eocdView.setUint16(10, files.length, true);
+    eocdView.setUint32(12, centralSize, true);
+    eocdView.setUint32(16, centralOffset, true);
+    eocdView.setUint16(20, 0, true);
+    chunks.push(eocd);
+
+    return new Blob(chunks, { type: 'application/zip' });
+  }
+
+  _dosDateTime(dateObj) {
+    const year = Math.max(1980, dateObj.getFullYear());
+    return {
+      time: (dateObj.getHours() << 11) | (dateObj.getMinutes() << 5) | Math.floor(dateObj.getSeconds() / 2),
+      date: ((year - 1980) << 9) | ((dateObj.getMonth() + 1) << 5) | dateObj.getDate()
+    };
+  }
+
+  _crc32(bytes) {
+    const table = ExportHandler._crcTable || (ExportHandler._crcTable = this._makeCrcTable());
+    let crc = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) {
+      crc = (crc >>> 8) ^ table[(crc ^ bytes[i]) & 0xff];
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  _makeCrcTable() {
+    const table = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) {
+        c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      }
+      table[i] = c >>> 0;
+    }
+    return table;
   }
 
   _cleanup() {
