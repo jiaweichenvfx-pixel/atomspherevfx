@@ -185,10 +185,12 @@
       <div class="tab-content hidden" id="tab-smoke">
         <div class="param-section-label">烟雾样式</div>
         <div class="style-bar" id="smoke-style-bar">
-          <button class="style-btn active" data-style="static">🏞️ 静态</button>
-          <button class="style-btn" data-style="mist">🌫️ 薄雾</button>
-          <button class="style-btn" data-style="thick">💨 浓烟</button>
-          <button class="style-btn" data-style="steam">♨️ 蒸汽</button>
+          <button class="style-btn active" data-style="stageHaze">🌫️ 环境薄雾</button>
+          <button class="style-btn" data-style="groundFog">🌁 地面雾</button>
+          <button class="style-btn" data-style="plume">💨 烟柱</button>
+          <button class="style-btn" data-style="steamJet">♨️ 蒸汽喷口</button>
+          <button class="style-btn" data-style="dust">◒ 尘土</button>
+          <button class="style-btn" data-style="heavySmoke">● 浓烟团</button>
         </div>
         <div class="param-group">
           <label class="param-label">烟雾数量</label>
@@ -676,6 +678,6 @@
     <div id="loading-text">加载中...</div>
   </div>
 
-  <script type="module" src="js/main.js?v=26"></script>
+  <script type="module" src="js/main.js?v=30"></script>
 </body>
 </html>

@@ -8,17 +8,17 @@
  */
 
 import * as THREE from 'three';
-import { SceneManager } from './SceneManager.js';
-import { OrbitController } from './OrbitController.js';
-import { FBXHandler } from './FBXHandler.js';
-import { UIHandler } from './UIHandler.js';
-import { ParticleSystem } from './ParticleSystem.js';
-import { SmokeSystem } from './SmokeSystem.js';
-import { GodRaysSystem } from './GodRaysSystem.js';
-import { LightBeamSystem } from './LightBeamSystem.js';
-import { OccluderSystem } from './OccluderSystem.js';
-import { TimelineSystem } from './TimelineSystem.js';
-import { ExportHandler } from './ExportHandler.js';
+import { SceneManager } from './SceneManager.js?v=30';
+import { OrbitController } from './OrbitController.js?v=30';
+import { FBXHandler } from './FBXHandler.js?v=30';
+import { UIHandler } from './UIHandler.js?v=30';
+import { ParticleSystem } from './ParticleSystem.js?v=30';
+import { SmokeSystem } from './SmokeSystem.js?v=30';
+import { GodRaysSystem } from './GodRaysSystem.js?v=30';
+import { LightBeamSystem } from './LightBeamSystem.js?v=30';
+import { OccluderSystem } from './OccluderSystem.js?v=30';
+import { TimelineSystem } from './TimelineSystem.js?v=30';
+import { ExportHandler } from './ExportHandler.js?v=30';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 // ── 渲染器初始化 ──────────────────────────────────

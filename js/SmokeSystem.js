@@ -15,42 +15,10 @@
  */
 
 import * as THREE from 'three';
-
-const STYLES = ['static', 'mist', 'thick', 'steam'];
+import { getSmokePreset, SMOKE_PRESET_ORDER, SMOKE_PRESETS } from './SmokePresets.js?v=30';
 
 /** 每个烟雾簇包含的平面数（1 个主平面 + 4 个子平面） */
 const CLUSTER_SIZE = 5;
-
-const STYLE_PRESETS = {
-  static: {
-    count: 60, size: 3.5, riseSpeed: 0.03, spread: 12,
-    color: '#e8e8f0', opacity: 0.07,
-    driftX: 0, driftY: 0.03, driftZ: 0,
-    sizeVar: 0.3, opacityVar: 0.4, turbulence: 0.08,
-    lifetime: 30
-  },
-  mist: {
-    count: 50, size: 2.8, riseSpeed: 0.2, spread: 4.5,
-    color: '#ddeeff', opacity: 0.10,
-    driftX: 0, driftY: 0.3, driftZ: 0,
-    sizeVar: 0.5, opacityVar: 0.5, turbulence: 0.4,
-    lifetime: 22
-  },
-  thick: {
-    count: 45, size: 3.2, riseSpeed: 0.25, spread: 3.5,
-    color: '#aaaaaa', opacity: 0.14,
-    driftX: 0, driftY: 0.55, driftZ: 0,
-    sizeVar: 0.4, opacityVar: 0.4, turbulence: 0.6,
-    lifetime: 16
-  },
-  steam: {
-    count: 35, size: 2.0, riseSpeed: 0.7, spread: 2.8,
-    color: '#ffffff', opacity: 0.08,
-    driftX: 0, driftY: 1.2, driftZ: 0,
-    sizeVar: 0.35, opacityVar: 0.35, turbulence: 1.0,
-    lifetime: 9
-  }
-};
 
 // ── 烟雾系统类 ──────────────────────────────────────
 
@@ -67,11 +35,11 @@ export class SmokeSystem {
     /** @type {THREE.CanvasTexture|null} */
     this._texture = null;
 
-    this._style = 'static';
+    this._style = 'stageHaze';
     this._enabled = false;
     this._camera = null;
 
-    const p = STYLE_PRESETS.static;
+    const p = getSmokePreset(this._style);
     this._count = p.count;
     this._size = p.size;
     this._riseSpeed = p.riseSpeed;
@@ -366,16 +334,6 @@ export class SmokeSystem {
 
       // ── 簇到期 → 整簇重置 ──
       if (expiredClusters.has(sd.clusterId)) {
-        // 调试：重置时检查是否已完全淡出
-        if (mesh.material.opacity > 0.001) {
-          console.warn('⚠ Smoke reset while still visible!',
-            'cluster', sd.clusterId,
-            'primary', sd.isPrimary,
-            'age', sd.age.toFixed(2),
-            'maxAge', sd.maxAge.toFixed(2),
-            'remaining', (sd.maxAge - sd.age).toFixed(3),
-            'opacity', mesh.material.opacity.toFixed(5));
-        }
         sd.age = 0;
         sd.maxAge = this._lifetime * (0.65 + Math.random() * 0.7);
 
@@ -437,19 +395,7 @@ export class SmokeSystem {
         }
       }
       fadeMult = Math.max(0, Math.min(1, fadeMult));
-      const prevOpacity = mesh.material.opacity;
       mesh.material.opacity = this._opacity * sd.opacityFactor * fadeMult;
-      // 调试：追踪非淡出的瞬间消失（opacity 在单帧内骤降 80%+ 且之前可见）
-      if (prevOpacity > 0.005 && mesh.material.opacity < prevOpacity * 0.2) {
-        console.warn('⚠ Smoke sudden drop!',
-          'cluster', sd.clusterId,
-          'primary', sd.isPrimary,
-          'age', sd.age.toFixed(2),
-          'maxAge', sd.maxAge.toFixed(2),
-          'remaining', (sd.maxAge - sd.age).toFixed(3),
-          'fadeMult', fadeMult.toFixed(4),
-          'opacity', prevOpacity.toFixed(4), '→', mesh.material.opacity.toFixed(5));
-      }
 
       // ── 越界 → 速度转向回中心 ──
       const outX = Math.abs(pos.x - cx) > halfSpread;
@@ -517,10 +463,10 @@ export class SmokeSystem {
   // ── 样式切换 ─────────────────────────────────
 
   setStyle(style) {
-    if (!STYLES.includes(style) || style === this._style) return;
+    if (!SMOKE_PRESETS[style] || style === this._style) return;
     this._style = style;
 
-    const p = STYLE_PRESETS[style];
+    const p = getSmokePreset(style);
     this._count = p.count;
     this._size = p.size;
     this._riseSpeed = p.riseSpeed;
@@ -537,6 +483,7 @@ export class SmokeSystem {
   }
 
   get style() { return this._style; }
+  get availableStyles() { return SMOKE_PRESET_ORDER.slice(); }
 
   // ── 开关 ─────────────────────────────────────
 

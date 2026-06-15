@@ -1,0 +1,117 @@
+export const SMOKE_PRESET_ORDER = [
+  'stageHaze',
+  'groundFog',
+  'plume',
+  'steamJet',
+  'dust',
+  'heavySmoke'
+];
+
+export const SMOKE_PRESETS = {
+  stageHaze: {
+    label: '环境薄雾',
+    icon: '🌫️',
+    count: 80,
+    size: 4.8,
+    riseSpeed: 0.04,
+    spread: 18,
+    color: '#dfe8ff',
+    opacity: 0.055,
+    driftX: 0.05,
+    driftY: 0.02,
+    driftZ: 0,
+    sizeVar: 0.45,
+    opacityVar: 0.55,
+    turbulence: 0.18,
+    lifetime: 36
+  },
+  groundFog: {
+    label: '地面雾',
+    icon: '🌁',
+    count: 75,
+    size: 5.4,
+    riseSpeed: 0.025,
+    spread: 16,
+    color: '#d7dde8',
+    opacity: 0.075,
+    driftX: 0.18,
+    driftY: 0.01,
+    driftZ: 0.04,
+    sizeVar: 0.38,
+    opacityVar: 0.5,
+    turbulence: 0.22,
+    lifetime: 34
+  },
+  plume: {
+    label: '烟柱',
+    icon: '💨',
+    count: 65,
+    size: 3.1,
+    riseSpeed: 0.42,
+    spread: 5.2,
+    color: '#b7b7b7',
+    opacity: 0.13,
+    driftX: 0.02,
+    driftY: 0.65,
+    driftZ: 0,
+    sizeVar: 0.48,
+    opacityVar: 0.45,
+    turbulence: 0.85,
+    lifetime: 17
+  },
+  steamJet: {
+    label: '蒸汽喷口',
+    icon: '♨️',
+    count: 45,
+    size: 2.2,
+    riseSpeed: 0.85,
+    spread: 3.2,
+    color: '#ffffff',
+    opacity: 0.09,
+    driftX: 0,
+    driftY: 1.35,
+    driftZ: 0,
+    sizeVar: 0.35,
+    opacityVar: 0.4,
+    turbulence: 1.2,
+    lifetime: 8
+  },
+  dust: {
+    label: '尘土',
+    icon: '◒',
+    count: 70,
+    size: 3.4,
+    riseSpeed: 0.08,
+    spread: 11,
+    color: '#b8a98c',
+    opacity: 0.095,
+    driftX: 0.65,
+    driftY: 0.05,
+    driftZ: 0.18,
+    sizeVar: 0.55,
+    opacityVar: 0.55,
+    turbulence: 0.52,
+    lifetime: 24
+  },
+  heavySmoke: {
+    label: '浓烟团',
+    icon: '●',
+    count: 70,
+    size: 4.1,
+    riseSpeed: 0.16,
+    spread: 7.5,
+    color: '#6f7076',
+    opacity: 0.18,
+    driftX: 0.04,
+    driftY: 0.22,
+    driftZ: 0,
+    sizeVar: 0.42,
+    opacityVar: 0.35,
+    turbulence: 0.62,
+    lifetime: 22
+  }
+};
+
+export function getSmokePreset(id) {
+  return SMOKE_PRESETS[id] || SMOKE_PRESETS.stageHaze;
+}

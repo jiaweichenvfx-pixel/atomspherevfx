@@ -467,6 +467,15 @@ html, body {
   color: var(--text-primary);
 }
 
+#smoke-style-bar {
+  flex-wrap: wrap;
+}
+
+#smoke-style-bar .style-btn {
+  flex: 1 1 calc(50% - 6px);
+  min-width: 96px;
+}
+
 /* === 底部工具栏 === */
 #toolbar {
   position: absolute;
