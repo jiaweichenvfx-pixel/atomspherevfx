@@ -17,6 +17,7 @@ export class ExportHandler {
     this._particleSystem = null; // 由外部设置，用于导出时调整粒子大小
     this._smokeSystem = null; // 由外部设置，用于导出时调整烟雾大小
     this._godRaysSystem = null; // 由外部设置，用于导出时同步 composer 尺寸
+    this._motionBlurSystem = null; // 由外部设置，用于导出时同步尺寸/重置缓存
 
     this._isRecording = false;
     this._mediaRecorder = null;
@@ -36,6 +37,7 @@ export class ExportHandler {
   setParticleSystem(ps) { this._particleSystem = ps; }
   setSmokeSystem(ss) { this._smokeSystem = ss; }
   setGodRaysSystem(grs) { this._godRaysSystem = grs; }
+  setMotionBlurSystem(mbs) { this._motionBlurSystem = mbs; }
 
   // ── 输出视频 ──────────────────────────────────
 
@@ -66,6 +68,7 @@ export class ExportHandler {
 
     // 应用导出设置
     this._applyExportState(width, height, showBackground, showGrid, showVideo);
+    this._motionBlurSystem?.reset();
 
     this._mimeType = this._bestMimeType();
     this._recordedChunks = [];
@@ -179,6 +182,7 @@ export class ExportHandler {
 
     try {
       this._applyExportState(width, height, showBackground, showGrid, showVideo);
+      this._motionBlurSystem?.reset();
 
       const pad = String(frameCount).length;
       if (useDirectoryOutput) {
@@ -349,6 +353,7 @@ export class ExportHandler {
     this._renderer.setPixelRatio(1);
     this._renderer.setSize(width, height, false);
     this._godRaysSystem?.setSize(width, height);
+    this._motionBlurSystem?.setSize(width, height);
     this._renderer.domElement.style.width = width + 'px';
     this._renderer.domElement.style.height = height + 'px';
     this._renderer.domElement.style.position = 'fixed';
@@ -415,6 +420,10 @@ export class ExportHandler {
     }
     if (this._godRaysSystem) {
       this._godRaysSystem.setSize(this._renderer.domElement.width, this._renderer.domElement.height);
+    }
+    if (this._motionBlurSystem) {
+      this._motionBlurSystem.setSize(this._renderer.domElement.width, this._renderer.domElement.height);
+      this._motionBlurSystem.reset();
     }
 
     // 恢复遮挡板辅助线框可见性

@@ -7,29 +7,9 @@
  */
 
 import * as THREE from 'three';
+import { getParticlePreset, PARTICLE_PRESET_ORDER, PARTICLE_PRESETS } from './ParticlePresets.js?v=33';
 
-const STYLES = ['glow', 'snowflake', 'raindrop'];
-
-const STYLE_PRESETS = {
-  glow: {
-    count: 300, size: 0.08, speed: 0.3, spread: 5,
-    color: '#ffeedd', opacity: 0.5,
-    driftX: 0, driftY: 0, driftZ: 0,
-    sizeVar: 0.5, opacityVar: 0.5, turbulence: 1.0
-  },
-  snowflake: {
-    count: 200, size: 0.30, speed: 0.2, spread: 8,
-    color: '#ffffff', opacity: 0.8,
-    driftX: 0, driftY: 0, driftZ: 0,
-    sizeVar: 0.6, opacityVar: 0.3, turbulence: 1.2
-  },
-  raindrop: {
-    count: 500, size: 0.15, speed: 1.5, spread: 4,
-    color: '#aaccff', opacity: 0.6,
-    driftX: 0, driftY: -5, driftZ: 0,
-    sizeVar: 0.4, opacityVar: 0.3, turbulence: 0.15
-  }
-};
+const STYLES = PARTICLE_PRESET_ORDER;
 
 // ── 着色器（支持旋转 + 4×4 图集 + 生命周期淡入淡出）──────────
 
@@ -40,7 +20,9 @@ const VERTEX_SHADER = /* glsl */ `
   attribute float aRotation;
   attribute float aSpriteIndex;
   attribute float aLifeRatio;
+  attribute vec3 aVelocity;
   uniform float uPointScale;
+  uniform float uAlignToVelocity;
   varying vec3 vColor;
   varying float vOpacity;
   varying float vRotation;
@@ -51,9 +33,21 @@ const VERTEX_SHADER = /* glsl */ `
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     gl_PointSize = aSize * (uPointScale / -mvPosition.z);
+
+    float rotation = aRotation;
+    if (uAlignToVelocity > 0.5) {
+      vec4 nextClip = projectionMatrix * modelViewMatrix * vec4(position + aVelocity, 1.0);
+      vec2 currentNdc = gl_Position.xy / max(gl_Position.w, 0.0001);
+      vec2 nextNdc = nextClip.xy / max(nextClip.w, 0.0001);
+      vec2 screenDir = nextNdc - currentNdc;
+      if (dot(screenDir, screenDir) > 0.00000001) {
+        rotation = atan(screenDir.y, screenDir.x) - 1.5707963;
+      }
+    }
+
     vColor = aColor;
     vOpacity = aOpacity;
-    vRotation = aRotation;
+    vRotation = rotation;
     vSpriteIndex = aSpriteIndex;
     vLifeRatio = aLifeRatio;
   }
@@ -87,8 +81,7 @@ const FRAGMENT_SHADER = /* glsl */ `
                * (1.0 - smoothstep(0.75, 1.0, vLifeRatio));
 
     float alpha = texColor.a * vOpacity * fade;
-    // premultiplied alpha（与 WebGL 上下文 premultipliedAlpha=true 一致）
-    gl_FragColor = vec4(vColor * texColor.rgb * alpha, alpha);
+    gl_FragColor = vec4(vColor * texColor.rgb, alpha);
   }
 `;
 
@@ -107,7 +100,7 @@ export class ParticleSystem {
     this._enabled = false;
 
     // 初始化为光晕预设
-    const p = STYLE_PRESETS.glow;
+    const p = getParticlePreset('glow');
     this._count = p.count;
     this._size = p.size;
     this._speed = p.speed;
@@ -120,7 +113,9 @@ export class ParticleSystem {
     this._sizeVariance = p.sizeVar;
     this._opacityVariance = p.opacityVar;
     this._turbulence = p.turbulence;
-    this._rotationSpeed = 0.0;
+    this._rotationSpeed = p.rotation || 0.0;
+    this._rainLength = p.length || 1.0;
+    this._alignToVelocity = !!p.alignToVelocity;
 
     this._particleData = [];
     this._texture = null;
@@ -133,6 +128,7 @@ export class ParticleSystem {
     switch (this._style) {
       case 'snowflake': return this._createSnowflakeAtlas();
       case 'raindrop':  return this._createAtlasFromShape(this._createRaindropCell);
+      case 'classic':   return this._createAtlasFromShape(this._createClassicCell);
       default:          return this._createAtlasFromShape(this._createGlowCell);
     }
   }
@@ -158,50 +154,75 @@ export class ParticleSystem {
     return this._texture;
   }
 
-  /** 光晕 cell — 非对称柔光 + 偏轴亮点 */
+  /** 柔光微尘 cell — 纯白 alpha mask，避免暗色 RGB 边缘产生黑边 */
   _createGlowCell(ctx, s) {
     const h = s / 2;
-    // 主体：略偏的径向渐变
-    const g = ctx.createRadialGradient(h * 0.85, h * 0.45, 0, h, h, h);
-    g.addColorStop(0, 'rgba(255,255,255,0.95)');
-    g.addColorStop(0.15, 'rgba(255,240,220,0.85)');
-    g.addColorStop(0.4, 'rgba(200,180,150,0.35)');
-    g.addColorStop(0.7, 'rgba(100,80,60,0.04)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.clearRect(0, 0, s, s);
+
+    const g = ctx.createRadialGradient(h * 0.58, h * 0.42, 0, h, h, h * 0.92);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.18, 'rgba(255,255,255,0.72)');
+    g.addColorStop(0.48, 'rgba(255,255,255,0.18)');
+    g.addColorStop(0.78, 'rgba(255,255,255,0.035)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, s, s);
 
-    // 偏轴高光小点（用于显示旋转）
-    const hlG = ctx.createRadialGradient(h * 0.7, h * 0.35, 0, h * 0.7, h * 0.35, h * 0.25);
-    hlG.addColorStop(0, 'rgba(255,255,255,0.9)');
+    const hlG = ctx.createRadialGradient(h * 0.46, h * 0.37, 0, h * 0.46, h * 0.37, h * 0.18);
+    hlG.addColorStop(0, 'rgba(255,255,255,0.62)');
     hlG.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = hlG;
     ctx.beginPath();
-    ctx.arc(h * 0.7, h * 0.35, h * 0.25, 0, Math.PI * 2);
+    ctx.arc(h * 0.46, h * 0.37, h * 0.18, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  /** 雨点 cell */
+  /** 传统圆形粒子 cell */
+  _createClassicCell(ctx, s) {
+    const h = s / 2;
+    ctx.clearRect(0, 0, s, s);
+    const g = ctx.createRadialGradient(h, h, 0, h, h, h * 0.46);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.52, 'rgba(255,255,255,0.92)');
+    g.addColorStop(0.82, 'rgba(255,255,255,0.22)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, s, s);
+  }
+
+  /** 雨丝 cell — 细长带衰减的 streak，不再画成水滴椭圆 */
   _createRaindropCell(ctx, s) {
     const h = s / 2;
+    const streakLength = Math.max(0.25, Math.min(2, this._rainLength || 1));
+    const halfLen = Math.min(h * 0.92, h * (0.42 + streakLength * 0.32));
+    const halfCore = Math.min(h * 0.72, h * (0.24 + streakLength * 0.26));
+    ctx.clearRect(0, 0, s, s);
     ctx.save();
     ctx.translate(h, h);
-    ctx.scale(1, 2.5);
-    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, h * 0.35);
-    g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.2, 'rgba(200,220,255,0.8)');
-    g.addColorStop(0.5, 'rgba(150,180,240,0.3)');
-    g.addColorStop(0.8, 'rgba(100,140,220,0.05)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.rotate(-0.16);
+    const g = ctx.createLinearGradient(0, -halfLen, 0, halfLen);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.18, 'rgba(255,255,255,0.26)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.96)');
+    g.addColorStop(0.72, 'rgba(255,255,255,0.42)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = g;
-    ctx.fillRect(-h, -h, s, s);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, h * 0.07 / Math.sqrt(streakLength), halfLen, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const core = ctx.createLinearGradient(0, -halfCore, 0, halfCore);
+    core.addColorStop(0, 'rgba(255,255,255,0)');
+    core.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+    core.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = core;
+    ctx.lineWidth = Math.max(1, s * 0.035 / Math.sqrt(streakLength));
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -halfCore);
+    ctx.lineTo(0, halfCore);
+    ctx.stroke();
     ctx.restore();
-    // 顶部高光
-    const topG = ctx.createRadialGradient(h, h * 0.3, 0, h, h * 0.3, h * 0.12);
-    topG.addColorStop(0, 'rgba(255,255,255,0.9)');
-    topG.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = topG;
-    ctx.fillRect(0, 0, s, s);
   }
 
   /** 雪花 4×4 图集 — 每格随机不规则形状 */
@@ -373,12 +394,13 @@ export class ParticleSystem {
     const rotations = new Float32Array(count);
     const spriteIndices = new Float32Array(count);
     const lifeRatios = new Float32Array(count);
+    const velocities = new Float32Array(count * 3);
 
     this._particleData = [];
 
     for (let i = 0; i < count; i++) {
       this._resetParticle(i, positions, colors, sizes, opacities,
-        rotations, spriteIndices, lifeRatios, true);
+        rotations, spriteIndices, lifeRatios, velocities, true);
     }
 
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -388,12 +410,13 @@ export class ParticleSystem {
     geo.setAttribute('aRotation', new THREE.BufferAttribute(rotations, 1));
     geo.setAttribute('aSpriteIndex', new THREE.BufferAttribute(spriteIndices, 1));
     geo.setAttribute('aLifeRatio', new THREE.BufferAttribute(lifeRatios, 1));
+    geo.setAttribute('aVelocity', new THREE.BufferAttribute(velocities, 3));
 
     return geo;
   }
 
   _resetParticle(i, positions, colors, sizes, opacities,
-                 rotations, spriteIndices, lifeRatios, randomLife) {
+                 rotations, spriteIndices, lifeRatios, velocities, randomLife) {
     // 位置（均匀分布在球体/立方体范围内）
     positions[i * 3] = this._center.x + (Math.random() - 0.5) * this._spread * 2;
     positions[i * 3 + 1] = this._center.y + (Math.random() - 0.5) * this._spread * 1.5;
@@ -407,27 +430,44 @@ export class ParticleSystem {
 
     // 大小
     const sizeVar = this._sizeVariance;
-    sizes[i] = this._size * varianceFactor(sizeVar);
+    const rainScale = this._style === 'raindrop' ? Math.max(0.65, Math.sqrt(this._rainLength || 1)) : 1;
+    sizes[i] = this._size * rainScale * varianceFactor(sizeVar);
 
     // 透明度
     const opacityVar = this._opacityVariance;
     opacities[i] = this._opacity * varianceFactor(opacityVar);
 
     // 旋转（随机初始角度）
-    rotations[i] = Math.random() * Math.PI * 2;
+    rotations[i] = this._style === 'raindrop'
+      ? (Math.random() - 0.5) * 0.16
+      : Math.random() * Math.PI * 2;
 
     // 图集索引（0-15）
     spriteIndices[i] = Math.floor(Math.random() * 16);
 
     // 生命周期比率
-    const lifetime = 3 + Math.random() * 4;
+    const lifetime = this._style === 'raindrop'
+      ? 0.9 + Math.random() * 1.25
+      : 3 + Math.random() * 4;
     const life = randomLife ? Math.random() * lifetime : 0;
     lifeRatios[i] = lifetime > 0 ? life / lifetime : 0;
 
     // 基础速度（原地微小漂动，方向随机）
-    const baseVelX = (Math.random() - 0.5) * 0.3;
-    const baseVelY = (Math.random() - 0.5) * 0.3;
-    const baseVelZ = (Math.random() - 0.5) * 0.3;
+    const baseVelX = this._style === 'raindrop'
+      ? (Math.random() - 0.5) * 0.08
+      : (Math.random() - 0.5) * 0.3;
+    const baseVelY = this._style === 'raindrop'
+      ? -0.35 - Math.random() * 0.35
+      : (Math.random() - 0.5) * 0.3;
+    const baseVelZ = this._style === 'raindrop'
+      ? (Math.random() - 0.5) * 0.08
+      : (Math.random() - 0.5) * 0.3;
+
+    if (velocities) {
+      velocities[i * 3] = (baseVelX + this._drift.x) * this._speed;
+      velocities[i * 3 + 1] = (baseVelY + this._drift.y) * this._speed;
+      velocities[i * 3 + 2] = (baseVelZ + this._drift.z) * this._speed;
+    }
 
     this._particleData[i] = {
       baseVelX, baseVelY, baseVelZ,
@@ -462,7 +502,8 @@ export class ParticleSystem {
       colors[i * 3 + 1] = this._color.g * v;
       colors[i * 3 + 2] = this._color.b * v;
 
-      sizes[i] = this._size * varianceFactor(this._sizeVariance);
+      const rainScale = this._style === 'raindrop' ? Math.max(0.65, Math.sqrt(this._rainLength || 1)) : 1;
+      sizes[i] = this._size * rainScale * varianceFactor(this._sizeVariance);
       opacities[i] = this._opacity * varianceFactor(this._opacityVariance);
       sprites[i] = Math.floor(Math.random() * 16);
     }
@@ -486,14 +527,16 @@ export class ParticleSystem {
     const material = new THREE.ShaderMaterial({
       uniforms: {
         uTexture: { value: texture },
-        uPointScale: { value: 300.0 }
+        uPointScale: { value: 300.0 },
+        uAlignToVelocity: { value: this._style === 'raindrop' && this._alignToVelocity ? 1 : 0 }
       },
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       transparent: true,
       depthWrite: false,
       depthTest: false,
-      blending: THREE.NormalBlending
+      blending: THREE.NormalBlending,
+      premultipliedAlpha: false
     });
 
     this.particles = new THREE.Points(geometry, material);
@@ -511,6 +554,7 @@ export class ParticleSystem {
     const pos = this.particles.geometry.attributes.position.array;
     const rot = this.particles.geometry.attributes.aRotation.array;
     const lr = this.particles.geometry.attributes.aLifeRatio.array;
+    const velocities = this.particles.geometry.attributes.aVelocity?.array || null;
     const dt = Math.min(deltaTime, 0.1);
     const driftX = this._drift.x;
     const driftY = this._drift.y;
@@ -528,7 +572,9 @@ export class ParticleSystem {
       // 生命周期结束，重置
       if (d.life >= d.maxLife) {
         d.life = 0;
-        d.maxLife = 3 + Math.random() * 4;
+        d.maxLife = this._style === 'raindrop'
+          ? 0.9 + Math.random() * 1.25
+          : 3 + Math.random() * 4;
         d.rotSpeed = (Math.random() - 0.5) * 2;
 
         pos[i * 3] = this._center.x + (Math.random() - 0.5) * this._spread * 2;
@@ -539,9 +585,15 @@ export class ParticleSystem {
         d.originY = pos[i * 3 + 1];
         d.originZ = pos[i * 3 + 2];
 
-        d.baseVelX = (Math.random() - 0.5) * 0.3;
-        d.baseVelY = (Math.random() - 0.5) * 0.3;
-        d.baseVelZ = (Math.random() - 0.5) * 0.3;
+        d.baseVelX = this._style === 'raindrop'
+          ? (Math.random() - 0.5) * 0.08
+          : (Math.random() - 0.5) * 0.3;
+        d.baseVelY = this._style === 'raindrop'
+          ? -0.35 - Math.random() * 0.35
+          : (Math.random() - 0.5) * 0.3;
+        d.baseVelZ = this._style === 'raindrop'
+          ? (Math.random() - 0.5) * 0.08
+          : (Math.random() - 0.5) * 0.3;
 
         d.phaseX = Math.random() * Math.PI * 2;
         d.phaseY = Math.random() * Math.PI * 2;
@@ -556,15 +608,30 @@ export class ParticleSystem {
       lr[i] = d.maxLife > 0 ? d.life / d.maxLife : 0;
 
       // 位置：漂移 + 基础速度
-      pos[i * 3] += (d.baseVelX + driftX) * this._speed * dt;
-      pos[i * 3 + 1] += (d.baseVelY + driftY) * this._speed * dt;
-      pos[i * 3 + 2] += (d.baseVelZ + driftZ) * this._speed * dt;
+      let velX = (d.baseVelX + driftX) * this._speed;
+      let velY = (d.baseVelY + driftY) * this._speed;
+      let velZ = (d.baseVelZ + driftZ) * this._speed;
+      pos[i * 3] += velX * dt;
+      pos[i * 3 + 1] += velY * dt;
+      pos[i * 3 + 2] += velZ * dt;
 
       // 湍流（也受速度影响）
       if (turbAmount > 0.001 && this._speed > 0.001) {
-        pos[i * 3] += d.ampX * Math.sin(now * d.freq + d.phaseX) * turbAmount * this._speed * dt;
-        pos[i * 3 + 1] += d.ampY * Math.sin(now * d.freq + d.phaseY) * turbAmount * this._speed * dt;
-        pos[i * 3 + 2] += d.ampZ * Math.sin(now * d.freq + d.phaseZ) * turbAmount * this._speed * dt;
+        const turbX = d.ampX * Math.sin(now * d.freq + d.phaseX) * turbAmount * this._speed;
+        const turbY = d.ampY * Math.sin(now * d.freq + d.phaseY) * turbAmount * this._speed;
+        const turbZ = d.ampZ * Math.sin(now * d.freq + d.phaseZ) * turbAmount * this._speed;
+        velX += turbX;
+        velY += turbY;
+        velZ += turbZ;
+        pos[i * 3] += turbX * dt;
+        pos[i * 3 + 1] += turbY * dt;
+        pos[i * 3 + 2] += turbZ * dt;
+      }
+
+      if (velocities) {
+        velocities[i * 3] = velX;
+        velocities[i * 3 + 1] = velY;
+        velocities[i * 3 + 2] = velZ;
       }
 
       // 旋转
@@ -577,6 +644,9 @@ export class ParticleSystem {
     }
 
     this.particles.geometry.attributes.position.needsUpdate = true;
+    if (velocities && this._style === 'raindrop') {
+      this.particles.geometry.attributes.aVelocity.needsUpdate = true;
+    }
     if (rotSpeedGlobal > 0.001) {
       this.particles.geometry.attributes.aRotation.needsUpdate = true;
     }
@@ -589,7 +659,7 @@ export class ParticleSystem {
     if (!STYLES.includes(style) || style === this._style) return;
     this._style = style;
 
-    const p = STYLE_PRESETS[style];
+    const p = getParticlePreset(style);
     this._count = p.count;
     this._size = p.size;
     this._speed = p.speed;
@@ -600,6 +670,9 @@ export class ParticleSystem {
     this._sizeVariance = p.sizeVar;
     this._opacityVariance = p.opacityVar;
     this._turbulence = p.turbulence;
+    this._rotationSpeed = p.rotation || 0;
+    this._rainLength = p.length || this._rainLength || 1;
+    this._alignToVelocity = !!p.alignToVelocity;
 
     this.create();
   }
@@ -701,6 +774,15 @@ export class ParticleSystem {
     this._rotationSpeed = Math.max(0, Math.min(20, v));
   }
 
+  setRainLength(v) {
+    const next = Math.max(0.25, Math.min(2, v));
+    if (Math.abs(next - this._rainLength) < 1e-6) return;
+    this._rainLength = next;
+    if (this._style === 'raindrop') {
+      this.create();
+    }
+  }
+
   /** 重置所有粒子旋转为 0 */
   resetRotation() {
     if (!this.particles) return;
@@ -736,6 +818,8 @@ export class ParticleSystem {
   get opacityVariance() { return this._opacityVariance; }
   get turbulence() { return this._turbulence; }
   get rotationSpeed() { return this._rotationSpeed; }
+  get rainLength() { return this._rainLength; }
+  get presets() { return PARTICLE_PRESETS; }
 
   dispose() {
     if (this.particles) {

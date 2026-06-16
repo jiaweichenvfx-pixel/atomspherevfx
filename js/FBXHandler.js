@@ -26,6 +26,12 @@ export class FBXHandler {
     this.activeCameraIndex = -1;
     this.animationPlaying = false;
     this.cameraPathLine = null;
+    this._importTransform = {
+      scale: 1,
+      center: new THREE.Vector3(),
+      rawSize: 0,
+      targetSize: 10
+    };
     this._onCamerasChanged = null;  // 回调：摄像机列表变更时通知 UIHandler
     this._onStatusUpdate = null;    // 回调：状态更新通知 UIHandler
     this._onModelLoaded = null;     // 回调：模型加载完成
@@ -84,25 +90,7 @@ export class FBXHandler {
         }
       });
 
-      // 居中并归一化模型大小（使灯光、距离都工作在合理尺度）
-      const box = new THREE.Box3().setFromObject(group);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3()).length();
-
-      const targetSize = 10;  // 归一化对角线 ~10 单位
-      if (size > 0.01) {
-        const scale = targetSize / size;
-        group.scale.setScalar(scale);
-        // 缩放后重新居中：将原中心映射到原点
-        group.position.set(
-          -center.x * scale,
-          -center.y * scale,
-          -center.z * scale
-        );
-      } else {
-        // 极小模型，仅居中
-        group.position.copy(center).multiplyScalar(-1);
-      }
+      this._normalizeGroupToEditingScale(group);
 
       this.scene.add(group);
 
@@ -151,6 +139,93 @@ export class FBXHandler {
   }
 
   /**
+   * Computes import bounds using visible geometry plus camera/light positions and
+   * raw position animation keys. Camera-only FBX files often have no mesh bounds,
+   * so Box3.setFromObject() alone misses their true working scale.
+   * @param {THREE.Group} group
+   * @returns {THREE.Box3}
+   */
+  _computeImportBounds(group) {
+    const bounds = new THREE.Box3();
+    const tmpBox = new THREE.Box3();
+    const tmpPos = new THREE.Vector3();
+    const tmpVec = new THREE.Vector3();
+    let hasBounds = false;
+
+    group.updateWorldMatrix(true, true);
+    group.traverse(child => {
+      if (child.isMesh || child.isLine || child.isPoints) {
+        tmpBox.setFromObject(child);
+        if (!tmpBox.isEmpty()) {
+          bounds.union(tmpBox);
+          hasBounds = true;
+        }
+      }
+
+      if (child.isCamera || child.isLight) {
+        child.getWorldPosition(tmpPos);
+        bounds.expandByPoint(tmpPos);
+        hasBounds = true;
+      }
+    });
+
+    const clips = Array.isArray(group.animations) ? group.animations : [];
+    for (const clip of clips) {
+      for (const track of clip.tracks || []) {
+        if (!track?.name?.endsWith('.position') || !track.values) continue;
+        for (let i = 0; i < track.values.length; i += 3) {
+          tmpVec.set(track.values[i], track.values[i + 1], track.values[i + 2]);
+          if (Number.isFinite(tmpVec.x) && Number.isFinite(tmpVec.y) && Number.isFinite(tmpVec.z)) {
+            tmpVec.applyMatrix4(group.matrixWorld);
+            bounds.expandByPoint(tmpVec);
+            hasBounds = true;
+          }
+        }
+      }
+    }
+
+    if (!hasBounds) bounds.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
+    return bounds;
+  }
+
+  /**
+   * Normalize imported content into the app editing scale.
+   * Default grid is 20x20 units; imported FBX content is fit to ~10 units diagonal.
+   * @param {THREE.Group} group
+   * @returns {{scale:number, center:THREE.Vector3, size:number}}
+   */
+  _normalizeGroupToEditingScale(group) {
+    const box = this._computeImportBounds(group);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3()).length();
+    const hasCameraAnimation = this._hasPositionAnimation(group);
+    const targetSize = hasCameraAnimation ? 100 : 10;
+    const scale = size > 0.01 ? targetSize / size : 1;
+
+    group.scale.setScalar(scale);
+    group.position.set(
+      -center.x * scale,
+      -center.y * scale,
+      -center.z * scale
+    );
+    group.updateWorldMatrix(true, true);
+
+    this._importTransform = {
+      scale,
+      center: center.clone(),
+      rawSize: size,
+      targetSize
+    };
+
+    return { scale, center, size, targetSize };
+  }
+
+  _hasPositionAnimation(group) {
+    const clips = Array.isArray(group.animations) ? group.animations : [];
+    return clips.some(clip => (clip.tracks || []).some(track => track?.name?.endsWith('.position')));
+  }
+
+  /**
    * 从模型中提取摄像机
    */
   _extractCameras(group) {
@@ -160,6 +235,11 @@ export class FBXHandler {
       if (child.isCamera) {
         const worldPos = new THREE.Vector3();
         child.getWorldPosition(worldPos);
+        const sourceWorldPos = worldPos.clone();
+        if (this._importTransform?.scale && this._importTransform.scale !== 1) {
+          const invGroupMatrix = new THREE.Matrix4().copy(group.matrixWorld).invert();
+          sourceWorldPos.applyMatrix4(invGroupMatrix);
+        }
         const animated = this._objectOrAncestorsHaveAnimation(child);
 
         this.cameras.push({
@@ -172,7 +252,9 @@ export class FBXHandler {
           fov: child.isPerspectiveCamera ? child.fov : null,
           near: child.near,
           far: child.far,
-          worldPos: worldPos.toArray().map(v => +v.toFixed(1))
+          worldPos: worldPos.toArray().map(v => +v.toFixed(1)),
+          sourceWorldPos: sourceWorldPos.toArray().map(v => +v.toFixed(1)),
+          importScale: this._importTransform?.scale || 1
         });
       }
     });

@@ -8,17 +8,18 @@
  */
 
 import * as THREE from 'three';
-import { SceneManager } from './SceneManager.js?v=30';
-import { OrbitController } from './OrbitController.js?v=30';
-import { FBXHandler } from './FBXHandler.js?v=30';
-import { UIHandler } from './UIHandler.js?v=30';
-import { ParticleSystem } from './ParticleSystem.js?v=30';
-import { SmokeSystem } from './SmokeSystem.js?v=30';
-import { GodRaysSystem } from './GodRaysSystem.js?v=30';
-import { LightBeamSystem } from './LightBeamSystem.js?v=30';
-import { OccluderSystem } from './OccluderSystem.js?v=30';
-import { TimelineSystem } from './TimelineSystem.js?v=30';
-import { ExportHandler } from './ExportHandler.js?v=30';
+import { SceneManager } from './SceneManager.js?v=33';
+import { OrbitController } from './OrbitController.js?v=33';
+import { FBXHandler } from './FBXHandler.js?v=33';
+import { UIHandler } from './UIHandler.js?v=33';
+import { ParticleSystem } from './ParticleSystem.js?v=33';
+import { SmokeSystem } from './SmokeSystem.js?v=33';
+import { GodRaysSystem } from './GodRaysSystem.js?v=33';
+import { LightBeamSystem } from './LightBeamSystem.js?v=33';
+import { OccluderSystem } from './OccluderSystem.js?v=33';
+import { TimelineSystem } from './TimelineSystem.js?v=33';
+import { ExportHandler } from './ExportHandler.js?v=33';
+import { MotionBlurSystem } from './MotionBlurSystem.js?v=33';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 // ── 渲染器初始化 ──────────────────────────────────
@@ -192,6 +193,9 @@ smokeSystem.updatePointScale(renderer.domElement.height);
 // 旧式后处理光束系统（可选）
 const godRaysSystem = new GodRaysSystem(renderer, scene, camera);
 
+// 最终画面运动模糊（在普通渲染/后处理光束之后叠加）
+const motionBlurSystem = new MotionBlurSystem(renderer);
+
 // 可见体积光束系统（VFX 主效果）
 const lightBeamSystem = new LightBeamSystem(scene);
 
@@ -209,6 +213,7 @@ exportHandler.setCamera(camera);
 exportHandler.setParticleSystem(particleSystem);
 exportHandler.setSmokeSystem(smokeSystem);
 exportHandler.setGodRaysSystem(godRaysSystem);
+exportHandler.setMotionBlurSystem(motionBlurSystem);
 
 // UI 处理器（最后初始化，因为它需要其他模块的引用）
 const uiHandler = new UIHandler({
@@ -218,6 +223,7 @@ const uiHandler = new UIHandler({
   particleSystem,
   smokeSystem,
   godRaysSystem,
+  motionBlurSystem,
   lightBeamSystem,
   occluderSystem,
   timelineSystem,
@@ -284,6 +290,7 @@ function animate() {
 
   // 渲染（光束系统根据开关决定走直接渲染或后处理管线）
   godRaysSystem.render();
+  motionBlurSystem.apply();
 }
 
 // ── 启动 ──────────────────────────────────────────
@@ -307,6 +314,7 @@ function resizeForVideo(width, height) {
 
   renderer.setSize(rw, rh, false);
   godRaysSystem.setSize(rw, rh);
+  motionBlurSystem.setSize(renderer.domElement.width, renderer.domElement.height);
   renderer.domElement.style.width = rw + 'px';
   renderer.domElement.style.height = rh + 'px';
   renderer.domElement.style.position = 'absolute';
@@ -336,6 +344,7 @@ function restoreWindowSize() {
 
   renderer.setSize(w, h);
   godRaysSystem.setSize(w, h);
+  motionBlurSystem.setSize(renderer.domElement.width, renderer.domElement.height);
   renderer.domElement.style.width = '100%';
   renderer.domElement.style.height = '100%';
   renderer.domElement.style.position = '';
@@ -421,6 +430,7 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
     godRaysSystem.setSize(window.innerWidth, window.innerHeight);
+    motionBlurSystem.setSize(renderer.domElement.width, renderer.domElement.height);
   }
   particleSystem.updatePointScale(renderer.domElement.height);
   smokeSystem.updatePointScale(renderer.domElement.height);
@@ -440,6 +450,7 @@ if (typeof window !== 'undefined') {
     particleSystem,
     smokeSystem,
     godRaysSystem,
+    motionBlurSystem,
     lightBeamSystem,
     occluderSystem,
     exportHandler,

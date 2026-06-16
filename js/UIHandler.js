@@ -17,13 +17,14 @@ export class UIHandler {
    * @param {THREE.PerspectiveCamera} modules.camera
    * @param {THREE.Scene} modules.scene
    */
-  constructor({ sceneManager, orbitController, fbxHandler, particleSystem, smokeSystem, godRaysSystem, lightBeamSystem, occluderSystem, timelineSystem, exportHandler, renderer, camera, scene }) {
+  constructor({ sceneManager, orbitController, fbxHandler, particleSystem, smokeSystem, godRaysSystem, motionBlurSystem, lightBeamSystem, occluderSystem, timelineSystem, exportHandler, renderer, camera, scene }) {
     this.sceneManager = sceneManager;
     this.orbitController = orbitController;
     this.fbxHandler = fbxHandler;
     this.particleSystem = particleSystem;
     this.smokeSystem = smokeSystem;
     this.godRaysSystem = godRaysSystem;
+    this.motionBlurSystem = motionBlurSystem;
     this.lightBeamSystem = lightBeamSystem;
     this.occluderSystem = occluderSystem;
     this.timelineSystem = timelineSystem;
@@ -57,6 +58,7 @@ export class UIHandler {
     this._bindParticleControls();
     this._bindSmokeControls();
     this._bindGodRaysControls();
+    this._bindMotionBlurControls();
     this._bindOccluderControls();
     this._toggleNoiseControls(false);  // 默认条纹模式，隐藏噪点专属控件
     this._bindObjectsPanel();
@@ -431,6 +433,9 @@ export class UIHandler {
       const posStr = camInfo.worldPos
         ? `(${camInfo.worldPos[0]}, ${camInfo.worldPos[1]}, ${camInfo.worldPos[2]})`
         : '';
+      const sourcePosStr = camInfo.sourceWorldPos && camInfo.importScale && Math.abs(camInfo.importScale - 1) > 1e-6
+        ? `原始 (${camInfo.sourceWorldPos[0]}, ${camInfo.sourceWorldPos[1]}, ${camInfo.sourceWorldPos[2]})`
+        : '';
       if (camInfo.active) {
         li.classList.add('active');
       }
@@ -441,6 +446,7 @@ export class UIHandler {
           <span class="cam-fov">${camInfo.animated ? '动画' : fovStr}</span>
         </div>
         <div class="cam-pos">${posStr}</div>
+        ${sourcePosStr ? `<div class="cam-pos">${sourcePosStr}</div>` : ''}
       `;
 
       li.addEventListener('click', () => {
@@ -691,6 +697,7 @@ export class UIHandler {
     const ids = [
       'particle-count', 'particle-size', 'particle-size-var',
       'particle-speed', 'particle-spread',
+      'particle-rain-length',
       'particle-origin-x', 'particle-origin-y', 'particle-origin-z',
       'particle-opacity', 'particle-opacity-var',
       'particle-drift-x', 'particle-drift-y', 'particle-drift-z',
@@ -737,9 +744,11 @@ export class UIHandler {
         btn.classList.add('active');
         // 刷新所有滑块为预设值
         this._updateParticleSliders();
+        this._syncParticleRainControls();
         this.updateStatus(`粒子样式: ${btn.textContent.trim()}`);
       });
     });
+    this._syncParticleRainControls();
   }
 
   _applyParticleFromSliders() {
@@ -751,6 +760,7 @@ export class UIHandler {
     const sizeVar = parseFloat(document.getElementById('particle-size-var')?.value || 0.5);
     const speed = parseFloat(document.getElementById('particle-speed')?.value || 0.4);
     const spread = parseFloat(document.getElementById('particle-spread')?.value || 5);
+    const rainLength = parseFloat(document.getElementById('particle-rain-length')?.value || 1.25);
     const originX = parseFloat(document.getElementById('particle-origin-x')?.value || 0);
     const originY = parseFloat(document.getElementById('particle-origin-y')?.value || 0);
     const originZ = parseFloat(document.getElementById('particle-origin-z')?.value || 0);
@@ -768,6 +778,7 @@ export class UIHandler {
     if (sizeVar !== ps.sizeVariance) ps.setSizeVariance(sizeVar);
     if (speed !== ps.speed) ps.setSpeed(speed);
     if (spread !== ps.spread) ps.setSpread(spread);
+    if (rainLength !== ps.rainLength) ps.setRainLength(rainLength);
     if (originX !== ps.originX || originY !== ps.originY || originZ !== ps.originZ) {
       ps.setOriginOffset(originX, originY, originZ);
     }
@@ -813,6 +824,7 @@ export class UIHandler {
     setSlider('particle-size-var', ps.sizeVariance);
     setSlider('particle-speed', ps.speed);
     setSlider('particle-spread', ps.spread);
+    setSlider('particle-rain-length', ps.rainLength);
     setSlider('particle-origin-x', ps.originX);
     setSlider('particle-origin-y', ps.originY);
     setSlider('particle-origin-z', ps.originZ);
@@ -825,6 +837,13 @@ export class UIHandler {
     setSlider('particle-rotation', ps.rotationSpeed);
     const colorInput = document.getElementById('particle-color');
     if (colorInput) colorInput.value = ps.color;
+    this._syncParticleRainControls();
+  }
+
+  _syncParticleRainControls() {
+    const group = document.getElementById('particle-rain-length-group');
+    if (!group || !this.particleSystem) return;
+    group.style.display = this.particleSystem.style === 'raindrop' ? '' : 'none';
   }
 
   // ── 烟雾控件绑定 ──────────────────────────────────
@@ -1178,6 +1197,43 @@ export class UIHandler {
     if (gammaCheck) gammaCheck.checked = gr.gammaCorrection;
     const postprocessCheck = document.getElementById('godrays-postprocess-enabled');
     if (postprocessCheck) postprocessCheck.checked = gr.enabled;
+  }
+
+  _bindMotionBlurControls() {
+    const enabled = document.getElementById('motion-blur-enabled');
+    const strength = document.getElementById('motion-blur-strength');
+    const strengthVal = document.getElementById('motion-blur-strength-val');
+    if (enabled) {
+      enabled.addEventListener('change', () => this._applyMotionBlurFromControls());
+    }
+    if (strength) {
+      strength.addEventListener('input', () => {
+        if (strengthVal) strengthVal.textContent = strength.value;
+        this._applyMotionBlurFromControls();
+      });
+    }
+    this._updateMotionBlurControls();
+  }
+
+  _applyMotionBlurFromControls() {
+    const mb = this.motionBlurSystem;
+    if (!mb) return;
+    const enabled = document.getElementById('motion-blur-enabled')?.checked ?? false;
+    const strength = parseFloat(document.getElementById('motion-blur-strength')?.value || 0.18);
+    mb.setEnabled(enabled);
+    mb.strength = strength;
+    mb.reset();
+  }
+
+  _updateMotionBlurControls() {
+    const mb = this.motionBlurSystem;
+    if (!mb) return;
+    const enabled = document.getElementById('motion-blur-enabled');
+    const strength = document.getElementById('motion-blur-strength');
+    const strengthVal = document.getElementById('motion-blur-strength-val');
+    if (enabled) enabled.checked = mb.enabled;
+    if (strength) strength.value = mb.strength;
+    if (strengthVal) strengthVal.textContent = mb.strength;
   }
 
   // ── 遮挡板控件 ──────────────────────────────────
@@ -1845,6 +1901,7 @@ export class UIHandler {
     this.occluderSystem.update();
 
     this.godRaysSystem.render();
+    this.motionBlurSystem?.apply();
   }
 
   _setExportPresetInfo(text) {

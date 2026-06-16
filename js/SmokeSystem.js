@@ -15,7 +15,7 @@
  */
 
 import * as THREE from 'three';
-import { getSmokePreset, SMOKE_PRESET_ORDER, SMOKE_PRESETS } from './SmokePresets.js?v=30';
+import { getSmokePreset, SMOKE_PRESET_ORDER, SMOKE_PRESETS } from './SmokePresets.js?v=33';
 
 /** 每个烟雾簇包含的平面数（1 个主平面 + 4 个子平面） */
 const CLUSTER_SIZE = 5;
