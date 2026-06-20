@@ -4,7 +4,8 @@ export const SMOKE_PRESET_ORDER = [
   'plume',
   'steamJet',
   'dust',
-  'heavySmoke'
+  'heavySmoke',
+  'continuousDrift'
 ];
 
 export const SMOKE_PRESETS = {
@@ -108,7 +109,30 @@ export const SMOKE_PRESETS = {
     sizeVar: 0.42,
     opacityVar: 0.35,
     turbulence: 0.62,
-    lifetime: 22
+    lifetime: 22,
+    continuous: false,
+    emissionRate: 0,
+    spawnRadius: 2
+  },
+  continuousDrift: {
+    label: '持续飘烟',
+    icon: '↗',
+    count: 120,
+    size: 3.2,
+    riseSpeed: 0.18,
+    spread: 18,
+    color: '#c8cbd0',
+    opacity: 0.105,
+    driftX: 0.35,
+    driftY: 0.18,
+    driftZ: 0.04,
+    sizeVar: 0.5,
+    opacityVar: 0.5,
+    turbulence: 0.58,
+    lifetime: 14,
+    continuous: true,
+    emissionRate: 2.2,
+    spawnRadius: 1.8
   }
 };
 

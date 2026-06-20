@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .DS_Store
+.claude/
+.write_test
+shot*.fbx

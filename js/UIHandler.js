@@ -42,7 +42,10 @@ export class UIHandler {
     }
 
     // 注册 FBXHandler 回调
-    this.fbxHandler.onCamerasChanged((cameras) => this._renderCameraList(cameras));
+    this.fbxHandler.onCamerasChanged((cameras) => {
+      this._renderCameraList(cameras);
+      this._refreshSceneScaleUI();
+    });
     this.fbxHandler.onStatusUpdate((msg) => this.updateStatus(msg));
     this.fbxHandler.onModelLoaded(() => this._onModelLoaded());
   }
@@ -52,6 +55,7 @@ export class UIHandler {
     this._initialized = true;
 
     this._bindButtons();
+    this._bindSceneScaleControls();
     this._bindPanelToggles();
     this._bindTabSwitching();
     this._bindLightControls();
@@ -691,6 +695,102 @@ export class UIHandler {
     }
   }
 
+  // ── 导入场景缩放 ────────────────────────────────
+
+  _bindSceneScaleControls() {
+    const slider = document.getElementById('scene-scale-log');
+    const resetBtn = document.getElementById('btn-reset-scene-scale');
+    if (!slider) return;
+
+    slider.addEventListener('input', () => this._applySceneScaleFromSlider());
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        slider.value = '0';
+        this.fbxHandler.resetUserSceneScale();
+        this._refreshSceneScaleUI();
+        this._updateSliderRanges();
+        this._refreshViewAfterSceneScale();
+        this.updateStatus('导入场景缩放已重置为 1.00x');
+      });
+    }
+
+    this._refreshSceneScaleUI();
+  }
+
+  _applySceneScaleFromSlider() {
+    const slider = document.getElementById('scene-scale-log');
+    if (!slider || !this.fbxHandler.currentModel) return;
+
+    const logValue = parseFloat(slider.value);
+    const userScale = Math.pow(10, Number.isFinite(logValue) ? logValue : 0);
+    const info = this.fbxHandler.setUserSceneScale(userScale);
+    this._refreshSceneScaleUI(info);
+    this._updateSliderRanges();
+    this._refreshViewAfterSceneScale();
+    this.updateStatus(`导入场景缩放: ${this._formatSceneScaleMultiplier(info.userScale)}`);
+  }
+
+  _refreshSceneScaleUI(info = this.fbxHandler.getImportScaleInfo?.()) {
+    const panel = document.getElementById('scene-scale-panel');
+    const slider = document.getElementById('scene-scale-log');
+    const valueEl = document.getElementById('scene-scale-value');
+    const infoEl = document.getElementById('scene-scale-info');
+    if (!panel || !slider || !valueEl || !infoEl) return;
+
+    if (!this.fbxHandler.currentModel || !info) {
+      panel.classList.add('hidden');
+      valueEl.textContent = '1.00x';
+      infoEl.textContent = '未导入';
+      return;
+    }
+
+    panel.classList.remove('hidden');
+    const userScale = Math.max(0.01, Math.min(100, info.userScale || 1));
+    slider.value = String(Math.log10(userScale));
+    valueEl.textContent = this._formatSceneScaleMultiplier(userScale);
+
+    const workingSize = this.fbxHandler.getModelSize();
+    const sizeText = workingSize > 0 ? workingSize.toFixed(2) : '0.00';
+    infoEl.textContent = `自动 ${this._formatEffectiveScale(info.autoScale)} | 工作尺寸 ${sizeText}`;
+  }
+
+  _refreshViewAfterSceneScale() {
+    const camInfo = this.fbxHandler.getActiveCameraInfo();
+    if (this.fbxHandler.shouldFollowActiveCamera() && camInfo?.camera) {
+      this.orbitController.setFromCamera(camInfo.camera, {
+        copyProjection: true,
+        lookTarget: this.fbxHandler.shouldAimActiveCameraAtModel()
+          ? this.fbxHandler.getModelCenter()
+          : null,
+        targetDistance: Math.max(this.fbxHandler.getModelSize(), 10)
+      });
+      return;
+    }
+
+    if (this.fbxHandler.currentModel) {
+      const box = new THREE.Box3().setFromObject(this.fbxHandler.currentModel);
+      if (!box.isEmpty()) {
+        if (typeof this.orbitController.updateBoundsSettings === 'function') {
+          this.orbitController.updateBoundsSettings(box);
+        } else {
+          this.orbitController.fitToBounds(box);
+        }
+      }
+    }
+  }
+
+  _formatSceneScaleMultiplier(value) {
+    if (!Number.isFinite(value)) return '1.00x';
+    return `${value.toFixed(value >= 10 ? 1 : 2)}x`;
+  }
+
+  _formatEffectiveScale(value) {
+    if (!Number.isFinite(value)) return '1';
+    if (Math.abs(value) >= 0.01 && Math.abs(value) < 1000) return value.toFixed(4);
+    return value.toExponential(2);
+  }
+
   // ── 粒子控制 ─────────────────────────────────────
 
   _bindParticleControls() {
@@ -852,6 +952,8 @@ export class UIHandler {
     const ids = [
       'smoke-count', 'smoke-size', 'smoke-size-var',
       'smoke-spread',
+      'smoke-emission-rate', 'smoke-spawn-radius',
+      'smoke-lifetime', 'smoke-fade-duration',
       'smoke-origin-x', 'smoke-origin-y', 'smoke-origin-z',
       'smoke-opacity', 'smoke-opacity-var',
       'smoke-drift-x', 'smoke-drift-y', 'smoke-drift-z',
@@ -871,6 +973,11 @@ export class UIHandler {
     const colorInput = document.getElementById('smoke-color');
     if (colorInput) {
       colorInput.addEventListener('input', () => this._applySmokeFromSliders());
+    }
+
+    const continuousCheck = document.getElementById('smoke-continuous');
+    if (continuousCheck) {
+      continuousCheck.addEventListener('change', () => this._applySmokeFromSliders());
     }
 
     // 烟雾样式切换按钮
@@ -895,6 +1002,11 @@ export class UIHandler {
     const size = parseFloat(document.getElementById('smoke-size')?.value || 3.5);
     const sizeVar = parseFloat(document.getElementById('smoke-size-var')?.value || 0.3);
     const spread = parseFloat(document.getElementById('smoke-spread')?.value || 12);
+    const continuous = !!document.getElementById('smoke-continuous')?.checked;
+    const emissionRate = parseFloat(document.getElementById('smoke-emission-rate')?.value || 0);
+    const spawnRadius = parseFloat(document.getElementById('smoke-spawn-radius')?.value || 2);
+    const lifetime = parseFloat(document.getElementById('smoke-lifetime')?.value || 20);
+    const fadeDuration = parseFloat(document.getElementById('smoke-fade-duration')?.value || 5);
     const originX = parseFloat(document.getElementById('smoke-origin-x')?.value || 0);
     const originY = parseFloat(document.getElementById('smoke-origin-y')?.value || 0);
     const originZ = parseFloat(document.getElementById('smoke-origin-z')?.value || 0);
@@ -910,6 +1022,11 @@ export class UIHandler {
     if (size !== ss.size) ss.setSize(size);
     if (sizeVar !== ss.sizeVariance) ss.setSizeVariance(sizeVar);
     if (spread !== ss.spread) ss.setSpread(spread);
+    if (continuous !== ss.continuous) ss.setContinuous(continuous);
+    if (emissionRate !== ss.emissionRate) ss.setEmissionRate(emissionRate);
+    if (spawnRadius !== ss.spawnRadius) ss.setSpawnRadius(spawnRadius);
+    if (lifetime !== ss.lifetime) ss.setLifetime(lifetime);
+    if (fadeDuration !== ss.fadeDuration) ss.setFadeDuration(fadeDuration);
     if (originX !== ss.originX || originY !== ss.originY || originZ !== ss.originZ) {
       ss.setOriginOffset(originX, originY, originZ);
     }
@@ -954,6 +1071,10 @@ export class UIHandler {
     setSlider('smoke-size', ss.size);
     setSlider('smoke-size-var', ss.sizeVariance);
     setSlider('smoke-spread', ss.spread);
+    setSlider('smoke-emission-rate', ss.emissionRate);
+    setSlider('smoke-spawn-radius', ss.spawnRadius);
+    setSlider('smoke-lifetime', ss.lifetime);
+    setSlider('smoke-fade-duration', ss.fadeDuration);
     setSlider('smoke-origin-x', ss.originX);
     setSlider('smoke-origin-y', ss.originY);
     setSlider('smoke-origin-z', ss.originZ);
@@ -963,6 +1084,8 @@ export class UIHandler {
     setSlider('smoke-drift-y', ss.driftY);
     setSlider('smoke-drift-z', ss.driftZ);
     setSlider('smoke-turbulence', ss.turbulence);
+    const continuousCheck = document.getElementById('smoke-continuous');
+    if (continuousCheck) continuousCheck.checked = ss.continuous;
     const colorInput = document.getElementById('smoke-color');
     if (colorInput) colorInput.value = ss.color;
   }
@@ -1443,6 +1566,8 @@ export class UIHandler {
    * 模型加载后：粒子重定位到模型中心
    */
   _onModelLoaded() {
+    this._refreshSceneScaleUI();
+
     const center = this.fbxHandler.getModelCenter();
     const size = this.fbxHandler.getModelSize();
     if (center && size > 0) {

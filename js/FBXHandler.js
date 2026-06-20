@@ -27,7 +27,9 @@ export class FBXHandler {
     this.animationPlaying = false;
     this.cameraPathLine = null;
     this._importTransform = {
-      scale: 1,
+      autoScale: 1,
+      userScale: 1,
+      effectiveScale: 1,
       center: new THREE.Vector3(),
       rawSize: 0,
       targetSize: 10
@@ -200,24 +202,68 @@ export class FBXHandler {
     const size = box.getSize(new THREE.Vector3()).length();
     const hasCameraAnimation = this._hasPositionAnimation(group);
     const targetSize = hasCameraAnimation ? 100 : 10;
-    const scale = size > 0.01 ? targetSize / size : 1;
+    const autoScale = size > 0.01 ? targetSize / size : 1;
+    const userScale = 1;
+    const effectiveScale = autoScale * userScale;
 
-    group.scale.setScalar(scale);
-    group.position.set(
-      -center.x * scale,
-      -center.y * scale,
-      -center.z * scale
-    );
-    group.updateWorldMatrix(true, true);
+    this._applyImportTransform(group, effectiveScale, center);
 
     this._importTransform = {
-      scale,
+      autoScale,
+      userScale,
+      effectiveScale,
       center: center.clone(),
       rawSize: size,
       targetSize
     };
 
-    return { scale, center, size, targetSize };
+    return { scale: effectiveScale, center, size, targetSize, autoScale, userScale, effectiveScale };
+  }
+
+  _applyImportTransform(group, effectiveScale, center = this._importTransform?.center) {
+    if (!group || !center) return;
+    group.scale.setScalar(effectiveScale);
+    group.position.set(
+      -center.x * effectiveScale,
+      -center.y * effectiveScale,
+      -center.z * effectiveScale
+    );
+    group.updateWorldMatrix(true, true);
+    this._importTransform.effectiveScale = effectiveScale;
+  }
+
+  getImportScaleInfo() {
+    const info = this._importTransform || {};
+    return {
+      autoScale: info.autoScale ?? 1,
+      userScale: info.userScale ?? 1,
+      effectiveScale: info.effectiveScale ?? 1,
+      center: info.center ? info.center.clone() : new THREE.Vector3(),
+      rawSize: info.rawSize ?? 0,
+      targetSize: info.targetSize ?? 10
+    };
+  }
+
+  setUserSceneScale(userScale) {
+    if (!this.currentModel) return this.getImportScaleInfo();
+
+    const clamped = Number.isFinite(userScale) ? Math.max(0.01, Math.min(100, userScale)) : 1;
+    this._importTransform.userScale = clamped;
+    const effectiveScale = (this._importTransform.autoScale || 1) * clamped;
+    this._applyImportTransform(this.currentModel, effectiveScale, this._importTransform.center);
+    this.refreshImportDerivedData();
+    return this.getImportScaleInfo();
+  }
+
+  resetUserSceneScale() {
+    return this.setUserSceneScale(1);
+  }
+
+  refreshImportDerivedData() {
+    if (!this.currentModel) return null;
+    this._extractCameras(this.currentModel);
+    this._buildCameraPath();
+    return this.getImportScaleInfo();
   }
 
   _hasPositionAnimation(group) {
@@ -229,6 +275,10 @@ export class FBXHandler {
    * 从模型中提取摄像机
    */
   _extractCameras(group) {
+    const previousActiveIndex = this.activeCameraIndex;
+    const previousFollow = previousActiveIndex >= 0
+      ? this.cameras[previousActiveIndex]?.followAnimation
+      : false;
     this.cameras = [];
 
     group.traverse(child => {
@@ -236,25 +286,27 @@ export class FBXHandler {
         const worldPos = new THREE.Vector3();
         child.getWorldPosition(worldPos);
         const sourceWorldPos = worldPos.clone();
-        if (this._importTransform?.scale && this._importTransform.scale !== 1) {
+        if (this._importTransform?.effectiveScale && this._importTransform.effectiveScale !== 1) {
           const invGroupMatrix = new THREE.Matrix4().copy(group.matrixWorld).invert();
           sourceWorldPos.applyMatrix4(invGroupMatrix);
         }
         const animated = this._objectOrAncestorsHaveAnimation(child);
 
+        const index = this.cameras.length;
+        const active = index === previousActiveIndex;
         this.cameras.push({
           name: child.name || `摄像机 ${this.cameras.length + 1}`,
           type: child.isPerspectiveCamera ? '透视' : '正交',
           camera: child,
           animated,
-          active: false,
-          followAnimation: false,
+          active,
+          followAnimation: active ? !!previousFollow : false,
           fov: child.isPerspectiveCamera ? child.fov : null,
           near: child.near,
           far: child.far,
           worldPos: worldPos.toArray().map(v => +v.toFixed(1)),
           sourceWorldPos: sourceWorldPos.toArray().map(v => +v.toFixed(1)),
-          importScale: this._importTransform?.scale || 1
+          importScale: this._importTransform?.effectiveScale || 1
         });
       }
     });

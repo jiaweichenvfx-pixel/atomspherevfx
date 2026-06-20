@@ -158,10 +158,24 @@ export class OrbitController {
    * @param {THREE.Box3} box - 模型的包围盒
    */
   fitToBounds(box) {
-    const size = box.getSize(new THREE.Vector3()).length();
+    const { center } = this.updateBoundsSettings(box);
+
+    this.controls.target.copy(center);
+    this.camera.position.copy(this._defaultFit.position);
+    this.camera.lookAt(center);
+
+    this.controls.update();
+  }
+
+  /**
+   * 只刷新 OrbitControls 的距离、平移速度和重置视角参考，不移动当前相机。
+   * @param {THREE.Box3} box
+   * @returns {{size:number, center:THREE.Vector3}}
+   */
+  updateBoundsSettings(box) {
+    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 0.000001);
     const center = box.getCenter(new THREE.Vector3());
 
-    // 动态调整缩放范围
     this.controls.maxDistance = Math.max(size * 5000, 1000000);
     this.controls.minDistance = Math.max(size * 0.000001, 0.000001);
 
@@ -171,26 +185,17 @@ export class OrbitController {
       this.camera.updateProjectionMatrix();
     }
 
-    // 平移速度随场景尺寸缩放
     this.controls.panSpeed = size * 0.02;
 
-    // 将目标移到模型中心
-    this.controls.target.copy(center);
-
-    // 自动放置摄像机到合适位置
     const dist = size * 1.5;
-    this.camera.position.set(
+    this._defaultFit.position.set(
       center.x + dist * 0.6,
       center.y + dist * 0.4,
       center.z + dist * 0.8
     );
-    this.camera.lookAt(center);
-
-    // 记住这个视角作为 resetView 的目标
-    this._defaultFit.position.copy(this.camera.position);
     this._defaultFit.target.copy(center);
 
-    this.controls.update();
+    return { size, center };
   }
 
   /**

@@ -8,18 +8,18 @@
  */
 
 import * as THREE from 'three';
-import { SceneManager } from './SceneManager.js?v=33';
-import { OrbitController } from './OrbitController.js?v=33';
-import { FBXHandler } from './FBXHandler.js?v=33';
-import { UIHandler } from './UIHandler.js?v=33';
-import { ParticleSystem } from './ParticleSystem.js?v=33';
-import { SmokeSystem } from './SmokeSystem.js?v=33';
-import { GodRaysSystem } from './GodRaysSystem.js?v=33';
-import { LightBeamSystem } from './LightBeamSystem.js?v=33';
-import { OccluderSystem } from './OccluderSystem.js?v=33';
-import { TimelineSystem } from './TimelineSystem.js?v=33';
-import { ExportHandler } from './ExportHandler.js?v=33';
-import { MotionBlurSystem } from './MotionBlurSystem.js?v=33';
+import { SceneManager } from './SceneManager.js?v=35';
+import { OrbitController } from './OrbitController.js?v=35';
+import { FBXHandler } from './FBXHandler.js?v=35';
+import { UIHandler } from './UIHandler.js?v=35';
+import { ParticleSystem } from './ParticleSystem.js?v=35';
+import { SmokeSystem } from './SmokeSystem.js?v=35';
+import { GodRaysSystem } from './GodRaysSystem.js?v=35';
+import { LightBeamSystem } from './LightBeamSystem.js?v=35';
+import { OccluderSystem } from './OccluderSystem.js?v=35';
+import { TimelineSystem } from './TimelineSystem.js?v=35';
+import { ExportHandler } from './ExportHandler.js?v=35';
+import { MotionBlurSystem } from './MotionBlurSystem.js?v=35';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 // ── 渲染器初始化 ──────────────────────────────────

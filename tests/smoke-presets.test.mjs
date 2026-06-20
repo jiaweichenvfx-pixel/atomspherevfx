@@ -7,7 +7,8 @@ const expectedOrder = [
   'plume',
   'steamJet',
   'dust',
-  'heavySmoke'
+  'heavySmoke',
+  'continuousDrift'
 ];
 
 assert.deepEqual(SMOKE_PRESET_ORDER, expectedOrder);
@@ -27,3 +28,6 @@ for (const id of expectedOrder) {
 assert.ok(SMOKE_PRESETS.stageHaze.spread > SMOKE_PRESETS.plume.spread);
 assert.ok(SMOKE_PRESETS.groundFog.driftY < SMOKE_PRESETS.steamJet.driftY);
 assert.ok(SMOKE_PRESETS.heavySmoke.opacity > SMOKE_PRESETS.stageHaze.opacity);
+assert.equal(SMOKE_PRESETS.continuousDrift.continuous, true);
+assert.ok(SMOKE_PRESETS.continuousDrift.emissionRate > 0);
+assert.ok(SMOKE_PRESETS.continuousDrift.spawnRadius >= 0);

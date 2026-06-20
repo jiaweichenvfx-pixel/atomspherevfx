@@ -15,7 +15,7 @@
  */
 
 import * as THREE from 'three';
-import { getSmokePreset, SMOKE_PRESET_ORDER, SMOKE_PRESETS } from './SmokePresets.js?v=33';
+import { getSmokePreset, SMOKE_PRESET_ORDER, SMOKE_PRESETS } from './SmokePresets.js?v=35';
 
 /** 每个烟雾簇包含的平面数（1 个主平面 + 4 个子平面） */
 const CLUSTER_SIZE = 5;
@@ -53,6 +53,10 @@ export class SmokeSystem {
     this._opacityVariance = p.opacityVar;
     this._turbulence = p.turbulence;
     this._lifetime = p.lifetime;
+    this._continuous = !!p.continuous;
+    this._emissionRate = p.emissionRate ?? 0;
+    this._spawnRadius = p.spawnRadius ?? Math.min(this._spread * 0.2, 2);
+    this._emissionAccumulator = 0;
     this._fadeDuration = 5.0; // 淡入淡出时长（秒）
 
     // 视锥剔除 & 速度转向（每帧复用，避免 GC）
@@ -166,11 +170,21 @@ export class SmokeSystem {
   // ── 辅助 ──────────────────────────────────────
 
   _randomInVolume() {
-    const hs = this._spread / 2;
     return new THREE.Vector3(
       this._center.x + (Math.random() - 0.5) * this._spread,
       this._center.y + (Math.random() - 0.5) * this._spread,
       this._center.z + (Math.random() - 0.5) * this._spread
+    );
+  }
+
+  _randomSpawnPoint() {
+    const radius = Math.max(0, this._spawnRadius);
+    const angle = Math.random() * Math.PI * 2;
+    const dist = radius * Math.sqrt(Math.random());
+    return new THREE.Vector3(
+      this._center.x + Math.cos(angle) * dist,
+      this._center.y + (Math.random() - 0.5) * radius * 0.5,
+      this._center.z + Math.sin(angle) * dist
     );
   }
 
@@ -181,6 +195,99 @@ export class SmokeSystem {
       s * (0.5 + Math.random()),
       (Math.random() - 0.5) * s * 0.4
     );
+  }
+
+  _getClusterMeshes(clusterId) {
+    return this._planes.filter(mesh => mesh.userData.smokeData?.clusterId === clusterId);
+  }
+
+  _resetCluster(clusterId, { activate = true, spawnAtEmitter = false } = {}) {
+    const cluster = this._getClusterMeshes(clusterId);
+    if (cluster.length === 0) return false;
+
+    const primary = cluster.find(mesh => mesh.userData.smokeData?.isPrimary) || cluster[0];
+    const primarySD = primary.userData.smokeData;
+    const center = spawnAtEmitter ? this._randomSpawnPoint() : this._randomInVolume();
+    const velocity = this._randomVelocity();
+    const maxAge = this._lifetime * (0.65 + Math.random() * 0.7);
+
+    const primVariance = 1 - this._sizeVariance + Math.random() * this._sizeVariance * 2;
+    primarySD.sizeFactor = primVariance;
+    primary.position.copy(center);
+    primary.scale.set(this._size * primarySD.sizeFactor, this._size * primarySD.sizeFactor, 1);
+    primarySD.velocity.copy(velocity);
+    primarySD._clusterCenter = center.clone();
+    primarySD._clusterVelocity = velocity.clone();
+
+    for (const mesh of cluster) {
+      const sd = mesh.userData.smokeData;
+      sd.age = 0;
+      sd.maxAge = maxAge;
+      sd.active = activate;
+      sd.turbPhase = Math.random() * Math.PI * 2;
+      sd.turbFreq = 0.4 + Math.random() * 2.2;
+      sd.turbAmp = 0.5 + Math.random();
+      sd.roll = Math.random() * Math.PI * 2;
+      sd.rollSpeed = (Math.random() - 0.5) * 0.12;
+      mesh.visible = this._enabled && activate;
+
+      if (mesh === primary) continue;
+
+      const offsetR = this._size * (0.08 + Math.random() * 0.35);
+      const offsetAngle = Math.random() * Math.PI * 2;
+      mesh.position.set(
+        center.x + Math.cos(offsetAngle) * offsetR,
+        center.y + (Math.random() - 0.5) * this._size * 0.25,
+        center.z + Math.sin(offsetAngle) * offsetR
+      );
+      sd.velocity.copy(velocity);
+      sd.velocity.x += (Math.random() - 0.5) * this._riseSpeed * 0.15;
+      sd.velocity.y += (Math.random() - 0.5) * this._riseSpeed * 0.15;
+      sd.velocity.z += (Math.random() - 0.5) * this._riseSpeed * 0.15;
+
+      const childMult = 0.55 + Math.random() * 0.25;
+      const variancePart = 1 - this._sizeVariance + Math.random() * this._sizeVariance * 2;
+      const raw = variancePart * childMult;
+      sd.sizeFactor = Math.max(primarySD.sizeFactor * 0.5, Math.min(primarySD.sizeFactor, raw));
+      mesh.scale.set(this._size * sd.sizeFactor, this._size * sd.sizeFactor, 1);
+    }
+
+    return true;
+  }
+
+  _deactivateCluster(clusterId) {
+    for (const mesh of this._getClusterMeshes(clusterId)) {
+      const sd = mesh.userData.smokeData;
+      if (!sd) continue;
+      sd.active = false;
+      sd.age = 0;
+      mesh.visible = false;
+      mesh.material.opacity = 0;
+    }
+  }
+
+  _spawnNextCluster() {
+    const primary = this._planes.find(mesh => {
+      const sd = mesh.userData.smokeData;
+      return sd?.isPrimary && !sd.active;
+    });
+    if (!primary) return false;
+    return this._resetCluster(primary.userData.smokeData.clusterId, {
+      activate: true,
+      spawnAtEmitter: true
+    });
+  }
+
+  _updateContinuousEmission(dt) {
+    if (!this._continuous || this._emissionRate <= 0) return;
+    this._emissionAccumulator += dt * this._emissionRate;
+    const maxSpawnsPerFrame = 8;
+    let spawned = 0;
+    while (this._emissionAccumulator >= 1 && spawned < maxSpawnsPerFrame) {
+      if (!this._spawnNextCluster()) break;
+      this._emissionAccumulator -= 1;
+      spawned++;
+    }
   }
 
   // ── 构建与销毁 ────────────────────────────────
@@ -196,12 +303,14 @@ export class SmokeSystem {
 
     for (let c = 0; c < numClusters; c++) {
       // 簇的共享属性：中心位置 + 基础速度
-      const clusterCenter = this._randomInVolume();
+      const clusterCenter = this._continuous
+        ? this._randomSpawnPoint()
+        : this._randomInVolume();
       const clusterVelocity = this._randomVelocity();
       // 确保初始 age 不在淡出区：至少保留 fadeDuration + 2s 的可见余量
       const clusterMaxAge = this._lifetime * (0.65 + Math.random() * 0.7);
       const maxInitAge = Math.max(0.1, clusterMaxAge - this._fadeDuration - 2);
-      const clusterAge = Math.random() * maxInitAge;
+      const clusterAge = this._continuous ? 0 : Math.random() * maxInitAge;
 
       // 预计算主平面大小因子（子平面需以此为基准做比例约束）
       const primVariance = 1 - this._sizeVariance + Math.random() * this._sizeVariance * 2;
@@ -241,7 +350,7 @@ export class SmokeSystem {
         mesh.name = 'smoke-plane';
         mesh.renderOrder = 998;
         mesh.frustumCulled = false;
-        mesh.visible = this._enabled;
+        mesh.visible = this._enabled && !this._continuous;
 
         // 位置：簇中心 + 子平面随机偏移（紧贴主平面周围）
         if (isPrimary) {
@@ -280,7 +389,8 @@ export class SmokeSystem {
           roll: Math.random() * Math.PI * 2,
           rollSpeed: (Math.random() - 0.5) * 0.12,
           age: clusterAge,
-          maxAge: clusterMaxAge
+          maxAge: clusterMaxAge,
+          active: !this._continuous
         };
 
         this.scene.add(mesh);
@@ -293,6 +403,7 @@ export class SmokeSystem {
   update(deltaTime, options = {}) {
     if (!this._enabled || this._planes.length === 0) return;
 
+    const emitDt = Math.min(Math.max(deltaTime, 0), 1);
     const dt = Math.min(deltaTime, 0.1);
     const time = Number.isFinite(options.timeSeconds)
       ? options.timeSeconds
@@ -302,6 +413,8 @@ export class SmokeSystem {
     const cz = this._center.z;
     const halfSpread = this._spread / 2;
     const turbAmount = this._turbulence;
+
+    this._updateContinuousEmission(emitDt);
 
     // 更新视锥（用于手动剔除）
     if (this._camera) {
@@ -318,6 +431,10 @@ export class SmokeSystem {
     for (const mesh of this._planes) {
       const sd = mesh.userData.smokeData;
       if (!sd) continue;
+      if (this._continuous && !sd.active) {
+        mesh.visible = false;
+        continue;
+      }
       sd.age += dt;
       // 寿命结束后再留 _fadeDuration 秒让淡出自然完成（避免瞬间消失）
       if (sd.age >= sd.maxAge + this._fadeDuration) {
@@ -329,56 +446,18 @@ export class SmokeSystem {
     for (const mesh of this._planes) {
       const sd = mesh.userData.smokeData;
       if (!sd) continue;
+      if (this._continuous && !sd.active) continue;
 
       const pos = mesh.position;
 
       // ── 簇到期 → 整簇重置 ──
       if (expiredClusters.has(sd.clusterId)) {
-        sd.age = 0;
-        sd.maxAge = this._lifetime * (0.65 + Math.random() * 0.7);
-
-        if (sd.isPrimary) {
-          // 主平面：新随机位置 + 新速度
-          pos.copy(this._randomInVolume());
-          sd.velocity.copy(this._randomVelocity());
-          // 将簇中心缓存到 userData，供子平面读取
-          sd._clusterCenter = pos.clone();
-          sd._clusterVelocity = sd.velocity.clone();
-        } else {
-          // 子平面：围绕主平面的新位置偏移
-          const primary = this._getPrimaryInCluster(sd.clusterId);
-          if (primary) {
-            const cc = primary.userData.smokeData._clusterCenter;
-            const offsetR = this._size * (0.08 + Math.random() * 0.35);
-            const offsetAngle = Math.random() * Math.PI * 2;
-            pos.set(
-              cc.x + Math.cos(offsetAngle) * offsetR,
-              cc.y + (Math.random() - 0.5) * this._size * 0.25,
-              cc.z + Math.sin(offsetAngle) * offsetR
-            );
-            sd.velocity.copy(primary.userData.smokeData._clusterVelocity);
-            sd.velocity.x += (Math.random() - 0.5) * this._riseSpeed * 0.15;
-            sd.velocity.y += (Math.random() - 0.5) * this._riseSpeed * 0.15;
-            sd.velocity.z += (Math.random() - 0.5) * this._riseSpeed * 0.15;
-
-            // 重新计算子平面大小因子（约束在 primary 的 0.5~1.0 范围）
-            const primSizeFactor = primary.userData.smokeData.sizeFactor;
-            const childMult = 0.55 + Math.random() * 0.25;
-            const variancePart = 1 - this._sizeVariance + Math.random() * this._sizeVariance * 2;
-            let raw = variancePart * childMult;
-            sd.sizeFactor = Math.max(primSizeFactor * 0.5, Math.min(primSizeFactor, raw));
-            const planeSize = this._size * sd.sizeFactor;
-            mesh.scale.set(planeSize, planeSize, 1);
-          } else {
-            pos.copy(this._randomInVolume());
-            sd.velocity.copy(this._randomVelocity());
-          }
+        if (this._continuous) {
+          this._deactivateCluster(sd.clusterId);
+          continue;
         }
 
-        sd.turbPhase = Math.random() * Math.PI * 2;
-        sd.turbFreq = 0.4 + Math.random() * 2.2;
-        sd.roll = Math.random() * Math.PI * 2;
-        sd.rollSpeed = (Math.random() - 0.5) * 0.12;
+        this._resetCluster(sd.clusterId, { activate: true, spawnAtEmitter: false });
       }
 
       // ── 透明度淡入淡出（首尾各 _fadeDuration 秒） ──
@@ -478,6 +557,10 @@ export class SmokeSystem {
     this._opacityVariance = p.opacityVar;
     this._turbulence = p.turbulence;
     this._lifetime = p.lifetime;
+    this._continuous = !!p.continuous;
+    this._emissionRate = p.emissionRate ?? 0;
+    this._spawnRadius = p.spawnRadius ?? Math.min(this._spread * 0.2, 2);
+    this._emissionAccumulator = 0;
 
     this.create(); // 完全重建
   }
@@ -490,7 +573,8 @@ export class SmokeSystem {
   setEnabled(v) {
     this._enabled = v;
     for (const mesh of this._planes) {
-      mesh.visible = v;
+      const sd = mesh.userData.smokeData;
+      mesh.visible = !!v && (!this._continuous || !!sd?.active);
     }
   }
 
@@ -527,6 +611,41 @@ export class SmokeSystem {
 
   setLifetime(l) {
     this._lifetime = Math.max(1, l);
+  }
+
+  setContinuous(enabled) {
+    const next = !!enabled;
+    if (next === this._continuous) return;
+    this._continuous = next;
+    this._emissionAccumulator = 0;
+    if (this._continuous) {
+      for (const mesh of this._planes) {
+        const sd = mesh.userData.smokeData;
+        if (sd) {
+          sd.active = false;
+          sd.age = 0;
+        }
+        mesh.visible = false;
+        mesh.material.opacity = 0;
+      }
+    } else {
+      const clusters = new Set(this._planes.map(mesh => mesh.userData.smokeData?.clusterId).filter(id => id !== undefined));
+      for (const id of clusters) {
+        this._resetCluster(id, { activate: true, spawnAtEmitter: false });
+      }
+    }
+  }
+
+  setEmissionRate(rate) {
+    this._emissionRate = Math.max(0, Math.min(20, Number.isFinite(rate) ? rate : 0));
+  }
+
+  setSpawnRadius(radius) {
+    this._spawnRadius = Math.max(0, Math.min(30, Number.isFinite(radius) ? radius : 0));
+  }
+
+  setFadeDuration(seconds) {
+    this._fadeDuration = Math.max(0, Math.min(30, Number.isFinite(seconds) ? seconds : 0));
   }
 
   setOpacity(o) {
@@ -648,4 +767,8 @@ export class SmokeSystem {
   get opacityVariance() { return this._opacityVariance; }
   get turbulence() { return this._turbulence; }
   get lifetime() { return this._lifetime; }
+  get continuous() { return this._continuous; }
+  get emissionRate() { return this._emissionRate; }
+  get spawnRadius() { return this._spawnRadius; }
+  get fadeDuration() { return this._fadeDuration; }
 }

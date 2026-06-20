@@ -7,7 +7,7 @@
  */
 
 import * as THREE from 'three';
-import { getParticlePreset, PARTICLE_PRESET_ORDER, PARTICLE_PRESETS } from './ParticlePresets.js?v=33';
+import { getParticlePreset, PARTICLE_PRESET_ORDER, PARTICLE_PRESETS } from './ParticlePresets.js?v=35';
 
 const STYLES = PARTICLE_PRESET_ORDER;
 

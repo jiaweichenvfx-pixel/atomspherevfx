@@ -58,6 +58,17 @@
     <input type="number" id="frame-height" value="1080" min="240" max="4320" step="2">
   </div>
 
+  <!-- 导入场景缩放 -->
+  <div id="scene-scale-panel" class="panel hidden">
+    <div class="scene-scale-row">
+      <span class="scene-scale-label">场景缩放</span>
+      <input type="range" id="scene-scale-log" min="-2" max="2" step="0.01" value="0">
+      <span class="scene-scale-value" id="scene-scale-value">1.00x</span>
+      <button id="btn-reset-scene-scale" class="scene-scale-reset" type="button">重置</button>
+    </div>
+    <div class="scene-scale-info" id="scene-scale-info">未导入</div>
+  </div>
+
   <!-- 左侧摄像机列表 -->
   <div id="camera-panel" class="panel hidden">
     <div class="panel-header" id="camera-panel-toggle">
@@ -197,6 +208,7 @@
           <button class="style-btn" data-style="steamJet">♨️ 蒸汽喷口</button>
           <button class="style-btn" data-style="dust">◒ 尘土</button>
           <button class="style-btn" data-style="heavySmoke">● 浓烟团</button>
+          <button class="style-btn" data-style="continuousDrift">↗ 持续飘烟</button>
         </div>
         <div class="param-group">
           <label class="param-label">烟雾数量</label>
@@ -227,6 +239,33 @@
           <label class="param-label">生成范围</label>
           <input type="range" id="smoke-spread" min="0.5" max="30" step="0.1" value="12">
           <span class="param-value" id="smoke-spread-val">12</span>
+        </div>
+        <div class="param-section-label">持续生成</div>
+        <div class="param-group">
+          <label class="param-label">
+            <input type="checkbox" id="smoke-continuous">
+            不断从原点生成
+          </label>
+        </div>
+        <div class="param-group">
+          <label class="param-label">生成速率</label>
+          <input type="range" id="smoke-emission-rate" min="0" max="10" step="0.1" value="0">
+          <span class="param-value" id="smoke-emission-rate-val">0</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">初始散布</label>
+          <input type="range" id="smoke-spawn-radius" min="0" max="12" step="0.1" value="2">
+          <span class="param-value" id="smoke-spawn-radius-val">2</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">生命周期</label>
+          <input type="range" id="smoke-lifetime" min="2" max="60" step="0.5" value="20">
+          <span class="param-value" id="smoke-lifetime-val">20</span>
+        </div>
+        <div class="param-group">
+          <label class="param-label">淡出时间</label>
+          <input type="range" id="smoke-fade-duration" min="0" max="20" step="0.5" value="5">
+          <span class="param-value" id="smoke-fade-duration-val">5</span>
         </div>
         <div class="param-section-label">场景生成原点</div>
         <div class="param-group">
@@ -695,6 +734,6 @@
     <div id="loading-text">加载中...</div>
   </div>
 
-  <script type="module" src="js/main.js?v=33"></script>
+  <script type="module" src="js/main.js?v=35"></script>
 </body>
 </html>
